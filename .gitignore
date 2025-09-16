@@ -1,0 +1,13 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Playwright
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Variáveis de ambiente / credenciais
+.env
+.env.*
