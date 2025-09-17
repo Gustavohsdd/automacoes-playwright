@@ -1,16 +1,13 @@
 {
   "name": "rpa-notas",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "private": true,
+  "type": "commonjs",
   "dependencies": {
-    "dotenv": "^17.2.2",
-    "playwright": "^1.55.0"
+    "dotenv": "^16.4.5",
+    "playwright": "^1.47.2"
+  },
+  "scripts": {
+    "login": "node login.js"
   }
 }
