@@ -17,3 +17,19 @@ playwright-report/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Secrets
+**/service-account.json
+*.pem
+*.pfx
+*.key
+
+# .NET
+**/bin/
+**/obj/
+
+# Playwright (cache/instaladores)
+**/.playwright/
+**/playwright/.cache/
+**/playwright-report/
+**/test-results/
