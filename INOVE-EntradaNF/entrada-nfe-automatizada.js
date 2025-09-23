@@ -11,15 +11,11 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
-// === entrada-nfe-automatizada.js — helpers globais com prefixo ===
-const entradaNfeAutomatizada_spawn = require('child_process').spawn;
-const entradaNfeAutomatizada_os = require('os');
-
 // ===== CLR com RGB (Truecolor) e compatibilidade com API antiga =====
 globalThis.CLR ??= (() => {
   const ESC = '\x1b[';
   const reset = `${ESC}0m`;
-  const bold = `${ESC}1m`;
+  const bold  = `${ESC}1m`;
 
   // Detecção de profundidade e fallback automático
   const depth = (() => {
@@ -29,62 +25,62 @@ globalThis.CLR ??= (() => {
 
   // Fallback p/ 8/16 cores
   const BASIC = [
-    { code: 30, rgb: [0, 0, 0] }, { code: 31, rgb: [205, 49, 49] },
-    { code: 32, rgb: [13, 188, 121] }, { code: 33, rgb: [229, 229, 16] },
-    { code: 34, rgb: [36, 114, 200] }, { code: 35, rgb: [188, 63, 188] },
-    { code: 36, rgb: [17, 168, 205] }, { code: 37, rgb: [229, 229, 229] },
-    { code: 90, rgb: [128, 128, 128] },
+    { code: 30, rgb: [0,0,0] }, { code: 31, rgb: [205,49,49] },
+    { code: 32, rgb: [13,188,121] }, { code: 33, rgb: [229,229,16] },
+    { code: 34, rgb: [36,114,200] }, { code: 35, rgb: [188,63,188] },
+    { code: 36, rgb: [17,168,205] }, { code: 37, rgb: [229,229,229] },
+    { code: 90, rgb: [128,128,128] },
   ];
-  const nearestBasicCode = (r, g, b) => {
+  const nearestBasicCode = (r,g,b) => {
     let best = BASIC[0], bestD = Infinity;
     for (const c of BASIC) {
       const dr = r - c.rgb[0], dg = g - c.rgb[1], db = b - c.rgb[2];
-      const d = dr * dr + dg * dg + db * db;
+      const d = dr*dr + dg*dg + db*db;
       if (d < bestD) { bestD = d; best = c; }
     }
     return best.code;
   };
 
-  const fg = (r, g, b) => truecolor ? `${ESC}38;2;${r};${g};${b}m` : `${ESC}${nearestBasicCode(r, g, b)}m`;
-  const bg = (r, g, b) => {
+  const fg = (r,g,b) => truecolor ? `${ESC}38;2;${r};${g};${b}m` : `${ESC}${nearestBasicCode(r,g,b)}m`;
+  const bg = (r,g,b) => {
     if (truecolor) return `${ESC}48;2;${r};${g};${b}m`;
-    const c = nearestBasicCode(r, g, b);
+    const c = nearestBasicCode(r,g,b);
     return `${ESC}${(c >= 90 ? c + 10 : c + 10)}m`; // 30–37->40–47, 90–97->100–107
   };
-  const wrap = (txt, r, g, b, opts = {}) =>
-    `${opts.bg ? bg(r, g, b) : fg(r, g, b)}${opts.bold ? bold : ''}${txt}${reset}`;
+  const wrap = (txt, r,g,b, opts = {}) =>
+    `${opts.bg ? bg(r,g,b) : fg(r,g,b)}${opts.bold ? bold : ''}${txt}${reset}`;
 
   // === SUA PALETA CENTRAL (troque só estes números para mudar tudo) ===
   // helper: HEX -> [r,g,b]
-  const hexToRgb = (hex) => {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    if (!m) throw new Error('HEX inválido: ' + hex);
-    return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
-  };
+const hexToRgb = (hex) => {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) throw new Error('HEX inválido: ' + hex);
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+};
 
-  // edite aqui com o picker do VS Code (clique na cor)
-  const PALETTE_HEX = {
-    cyan: '#00B4FF', // perguntas
-    green: '#00C800', // sucesso
-    red: '#DC1E1E', // erro
-    yellow: '#FFC800', // atenção
-    blue: '#5078FF',
-    magenta: '#f1a009',
-    gray: '#969696',
-  };
+// edite aqui com o picker do VS Code (clique na cor)
+const PALETTE_HEX = {
+  cyan:    '#00B4FF', // perguntas
+  green:   '#00C800', // sucesso
+  red:     '#DC1E1E', // erro
+  yellow:  '#FFC800', // atenção
+  blue:    '#5078FF',
+  magenta: '#f1a009',
+  gray:    '#969696',
+};
 
-  // converte p/ a paleta que o CLR usa internamente
-  const PALETTE = Object.fromEntries(
-    Object.entries(PALETTE_HEX).map(([k, hex]) => [k, hexToRgb(hex)])
-  );
+// converte p/ a paleta que o CLR usa internamente
+const PALETTE = Object.fromEntries(
+  Object.entries(PALETTE_HEX).map(([k, hex]) => [k, hexToRgb(hex)])
+);
 
   // Gera propriedades compatíveis: CLR.cyan, CLR.red, etc. (foreground)
   const named = Object.fromEntries(
-    Object.entries(PALETTE).map(([k, [r, g, b]]) => [k, fg(r, g, b)])
+    Object.entries(PALETTE).map(([k, [r,g,b]]) => [k, fg(r,g,b)])
   );
   // Versões de fundo: CLR.bgCyan, CLR.bgRed, etc.
   const bgNamed = Object.fromEntries(
-    Object.entries(PALETTE).map(([k, [r, g, b]]) => [`bg${k[0].toUpperCase() + k.slice(1)}`, bg(r, g, b)])
+    Object.entries(PALETTE).map(([k, [r,g,b]]) => [`bg${k[0].toUpperCase()+k.slice(1)}`, bg(r,g,b)])
   );
 
   return { reset, bold, fg, bg, wrap, ...named, ...bgNamed };
@@ -128,7 +124,7 @@ function sanitizeForCmd(x) {
       .replace(/✔/g, '[OK]')
       .replace(/✖/g, '[X]')
       .replace(/⚠/g, '[!]');
-  }
+    }
 
   // normaliza quebras de linha para o Windows (evita duplicidade visual)
   s = s.replace(/\r?\n/g, EOL);
@@ -451,12 +447,12 @@ async function irParaAbaDadosDoProdutos(page) {
  */
 
 // aliases locais (NÃO redeclaram as globais do projeto)
-const _CLR = (globalThis.CLR ?? { reset: '\x1b[0m', bold: '\x1b[1m', red: '\x1b[31m' });
-const _color = (globalThis.color ?? { section: (s) => s, warn: (s) => s });
+const _CLR   = (globalThis.CLR   ?? { reset:'\x1b[0m', bold:'\x1b[1m', red:'\x1b[31m' });
+const _color = (globalThis.color ?? { section:(s)=>s, warn:(s)=>s });
 
 // Larguras alvo e mínimas por coluna
-const _PREFW = { IDX: 3, DESC: 44, CUSTO: 10, QTDE: 6, TOTAL: 14, FATOR: 6, COD: 10, DESCVINC: 32, CFOP: 6 };
-const _MINW = { IDX: 3, DESC: 22, CUSTO: 7, QTDE: 4, TOTAL: 10, FATOR: 4, COD: 6, DESCVINC: 16, CFOP: 3 };
+const _PREFW = { IDX:3, DESC:44, CUSTO:10, QTDE:6, TOTAL:14, FATOR:6, COD:10, DESCVINC:32, CFOP:6 };
+const _MINW  = { IDX:3, DESC:22, CUSTO:7,  QTDE:4, TOTAL:10, FATOR:4, COD:6,  DESCVINC:16, CFOP:3  };
 
 // separador entre colunas
 const _SEP = ' | ';
@@ -488,14 +484,14 @@ function _normLabel(s) {
     .trim()
     .toLowerCase();
 }
-function _isDesc(lbl) { const n = _normLabel(lbl); return n.includes('descr') && !n.includes('vinc'); }
-function _isCusto(lbl) { return _normLabel(lbl).includes('custo'); }
-function _isQtde(lbl) { const n = _normLabel(lbl); return n.includes('qtde') || n.includes('quant'); }
-function _isTotal(lbl) { return _normLabel(lbl).includes('total'); }
-function _isFator(lbl) { return _normLabel(lbl).includes('fator'); }
-function _isCodVinc(lbl) { const n = _normLabel(lbl); return n.includes('cod') && n.includes('vinc'); }
-function _isDescrVinc(lbl) { const n = _normLabel(lbl); return n.includes('descr') && n.includes('vinc'); }
-function _isCFOP(lbl) { return _normLabel(lbl).includes('cfop'); }
+function _isDesc(lbl){ const n=_normLabel(lbl); return n.includes('descr') && !n.includes('vinc'); }
+function _isCusto(lbl){ return _normLabel(lbl).includes('custo'); }
+function _isQtde(lbl){ const n=_normLabel(lbl); return n.includes('qtde') || n.includes('quant'); }
+function _isTotal(lbl){ return _normLabel(lbl).includes('total'); }
+function _isFator(lbl){ return _normLabel(lbl).includes('fator'); }
+function _isCodVinc(lbl){ const n=_normLabel(lbl); return n.includes('cod') && n.includes('vinc'); }
+function _isDescrVinc(lbl){ const n=_normLabel(lbl); return n.includes('descr') && n.includes('vinc'); }
+function _isCFOP(lbl){ return _normLabel(lbl).includes('cfop'); }
 
 /* ------------------- largura do terminal e linhas cheias ------------------- */
 function _termCols() {
@@ -504,7 +500,7 @@ function _termCols() {
     : 120;
   return Math.max(40, c); // nunca menos que 40
 }
-function _makeLine(ch = '=', margin = 1) {
+function _makeLine(ch='=', margin=1) {
   // mesma largura para "=" e "-" — margin=1 evita quebra por última coluna
   const w = _termCols() - margin;
   return ch.repeat(w);
@@ -535,13 +531,13 @@ function _recalcWidths() {
     if (sobra > 0) sobra -= reduce('DESC', Math.ceil(sobra * 0.6));
     if (sobra > 0) sobra -= reduce('DESCVINC', Math.ceil(sobra * 0.4));
 
-    const ordem = ['TOTAL', 'CUSTO', 'COD', 'FATOR', 'QTDE', 'CFOP'];
+    const ordem = ['TOTAL','CUSTO','COD','FATOR','QTDE','CFOP'];
     for (const k of ordem) {
       if (sobra <= 0) break;
       sobra -= reduce(k, Math.min(2, sobra));
     }
     if (sobra > 0) {
-      const all = ['DESC', 'DESCVINC', 'TOTAL', 'CUSTO', 'COD', 'FATOR', 'QTDE', 'CFOP'];
+      const all = ['DESC','DESCVINC','TOTAL','CUSTO','COD','FATOR','QTDE','CFOP'];
       for (const k of all) {
         if (sobra <= 0) break;
         sobra -= reduce(k, 1);
@@ -592,13 +588,13 @@ async function coletarProdutosDaTabela(page) {
     };
     const item = {
       descricao: await read(idx.descricao),
-      custo: await read(idx.custo),
-      qtde: await read(idx.qtde),
-      total: await read(idx.total),
-      fator: await read(idx.fator),
-      codVinc: await read(idx.codVinc),
+      custo:     await read(idx.custo),
+      qtde:      await read(idx.qtde),
+      total:     await read(idx.total),
+      fator:     await read(idx.fator),
+      codVinc:   await read(idx.codVinc),
       descrVinc: await read(idx.descrVinc),
-      cfop: await read(idx.cfop),
+      cfop:      await read(idx.cfop),
       _row: r
     };
     const temAlgo = Object.values(item).some(v => (typeof v === 'string' ? v.trim() !== '' : false));
@@ -617,15 +613,15 @@ async function coletarProdutosDaTabela(page) {
 function _buildHeader() {
   _recalcWidths();
   const parts = [
-    _padVal('idx', _W.IDX),
+    _padVal('idx',       _W.IDX),
     _padVal('Descrição', _W.DESC),
-    _padVal('Custo', _W.CUSTO),
-    _padVal('Qtde', _W.QTDE),
-    _padVal('Total', _W.TOTAL),
-    _padVal('Fator', _W.FATOR),
-    _padVal('Cód.Vinc', _W.COD),
-    _padVal('Descr.Vinc', _W.DESCVINC),
-    _padVal('CFOP', _W.CFOP),
+    _padVal('Custo',     _W.CUSTO),
+    _padVal('Qtde',      _W.QTDE),
+    _padVal('Total',     _W.TOTAL),
+    _padVal('Fator',     _W.FATOR),
+    _padVal('Cód.Vinc',  _W.COD),
+    _padVal('Descr.Vinc',_W.DESCVINC),
+    _padVal('CFOP',      _W.CFOP),
   ];
   return parts.join(_SEP);
 }
@@ -642,7 +638,7 @@ function printTabelaProdutos(produtos) {
   const headerStr = _buildHeader();
 
   // Agora as duas linhas usam a MESMA largura do terminal
-  const LINE_EQ = _makeLine('=');
+  const LINE_EQ   = _makeLine('=');
   const LINE_DASH = _makeLine('-');
 
   console.log(LINE_EQ);
@@ -651,15 +647,15 @@ function printTabelaProdutos(produtos) {
 
   produtos.forEach((p, i) => {
     let linha = [
-      _padLeft(i, _W.IDX),
-      _padVal(p.descricao, _W.DESC),
-      _padVal(p.custo, _W.CUSTO),
-      _padVal(p.qtde, _W.QTDE),
-      _padVal(p.total, _W.TOTAL),
-      _padVal(p.fator, _W.FATOR),
-      _padVal(p.codVinc, _W.COD),
-      _padVal(p.descrVinc, _W.DESCVINC),
-      _padVal(p.cfop, _W.CFOP),
+      _padLeft(i,           _W.IDX),
+      _padVal(p.descricao,  _W.DESC),
+      _padVal(p.custo,      _W.CUSTO),
+      _padVal(p.qtde,       _W.QTDE),
+      _padVal(p.total,      _W.TOTAL),
+      _padVal(p.fator,      _W.FATOR),
+      _padVal(p.codVinc,    _W.COD),
+      _padVal(p.descrVinc,  _W.DESCVINC),
+      _padVal(p.cfop,       _W.CFOP),
     ].join(_SEP);
 
     linha = _colorizeVazio(linha);
@@ -712,7 +708,7 @@ async function perguntarIndicesParaEditar(produtos, linhasCruas) {
 async function editarProdutosSelecionados(page, produtos, selecao) {
   // ---- Helper de pergunta inline (cursor na mesma linha) ----
   const tintAsk = (s) => (typeof color?.ask === 'function' ? color.ask(s)
-    : (typeof color?.info === 'function' ? color.info(s) : s));
+                    : (typeof color?.info === 'function' ? color.info(s) : s));
   async function ask(msg) {
     // imprime a mensagem colorida direto no prompt para ficar inline
     const resp = await prompt(tintAsk(String(msg)) + ' ');
@@ -723,7 +719,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
     if (!item?._row) throw new Error('Linha do produto (_row) não encontrada para abrir o modal.');
     const row = item._row;
     await row.waitFor({ timeout: 15000 });
-    await row.scrollIntoViewIfNeeded().catch(() => { });
+    await row.scrollIntoViewIfNeeded().catch(() => {});
     try { await row.dblclick(); }
     catch {
       const firstCell = row.locator('td').first();
@@ -752,15 +748,15 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
 
   // ---------- Helpers de input mascarado ----------
   async function limparCampoMascarado(inp, page) {
-    try { await inp.click({ force: true }); } catch { }
-    try { await inp.focus(); } catch { }
-    try { await page.keyboard.press('Control+A'); } catch { }
+    try { await inp.click({ force: true }); } catch {}
+    try { await inp.focus(); } catch {}
+    try { await page.keyboard.press('Control+A'); } catch {}
     for (let i = 0; i < 8; i++) {
-      try { await page.keyboard.press('Backspace'); } catch { }
+      try { await page.keyboard.press('Backspace'); } catch {}
       await page.waitForTimeout(20);
     }
     for (let i = 0; i < 2; i++) {
-      try { await page.keyboard.press('Delete'); } catch { }
+      try { await page.keyboard.press('Delete'); } catch {}
       await page.waitForTimeout(10);
     }
     await page.waitForTimeout(80);
@@ -809,7 +805,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
   async function tentarModoDecimal(inp, page, digs) {
     await limparCampoMascarado(inp, page);
     await digitarDigitos(inp, page, digs);      // sem vírgula — máscara desloca
-    try { await page.keyboard.press('Tab'); } catch { }
+    try { await page.keyboard.press('Tab'); } catch {}
     await page.waitForTimeout(160);
     const exibido = await lerValorSeguro(inp);
     const esperado = digitosParaDecimal3(digs);
@@ -819,7 +815,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
   async function tentarModoInteiro(inp, page, digs) {
     await limparCampoMascarado(inp, page);
     await digitarDigitos(inp, page, digs);      // inteiro, sem vírgula
-    try { await page.keyboard.press('Tab'); } catch { }
+    try { await page.keyboard.press('Tab'); } catch {}
     await page.waitForTimeout(160);
     const exibido = await lerValorSeguro(inp);
     const esperadoTrim = digs.replace(/^0+(?=\d)/, '');
@@ -883,8 +879,8 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
       const novo = await ask(`Codigo atual: ${atual || '[VAZIO]'} — Digite novo Codigo (Enter para manter):`);
       if (novo) {
         await inpCodigo.fill(novo);
-        try { await inpCodigo.focus(); } catch { }
-        try { await inpCodigo.press('Enter'); } catch { await page.keyboard.press('Enter').catch(() => { }); }
+        try { await inpCodigo.focus(); } catch {}
+        try { await inpCodigo.press('Enter'); } catch { await page.keyboard.press('Enter').catch(() => {}); }
         await page.waitForTimeout(150);
         console.log(color.ok(`✔ Codigo atualizado e confirmado (Enter): ${novo}`));
       } else {
@@ -961,7 +957,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
     if (!(await btnConfirmar.count())) btnConfirmar = modal.getByRole('button', { name: /Salvar/i }).first();
 
     if (await btnConfirmar.count()) {
-      await btnConfirmar.click().catch(() => { });
+      await btnConfirmar.click().catch(() => {});
       await waitModalFechar(page);
       console.log(color.ok('✔ Modal confirmado e fechado.'));
     } else {
@@ -972,395 +968,77 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
   }
 }
 
-// ============================================================================
-// entrada-nfe-automatizada.js — abrir editor de Preco/Markup via WinForms
-// Versao ASCII e sem arrays de strings (usa 1 template string `...`)
-// - Parser numerico pt-BR e ponto-decimal
-// - Layout com System.Drawing.Point
-// - Salva .ps1 com BOM UTF-8 (acentos OK dentro do PowerShell 5.1)
-// ============================================================================
-async function entradaNfeAutomatizada_abrirEditorPrecoMarkupWinForms(payload) {
-  const ps = `
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-[System.Windows.Forms.Application]::EnableVisualStyles()
-
-$cBR = [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')
-
-$json  = [Console]::In.ReadToEnd()
-if ([string]::IsNullOrWhiteSpace($json)) { exit 1 }
-$data  = $json | ConvertFrom-Json
-
-function ToNum($s) {
-  if ($null -eq $s) { return 0 }
-  $t = ($s -as [string]) -replace '[^0-9,.\-]',''
-  if ($t -match ',') {
-    $t = $t -replace '\\.',''
-    $t = $t -replace ',', '.'
-  } else {
-    if ($t -match '\\.') {
-      $parts = $t -split '\\.'
-      if ($parts.Count -gt 2) {
-        $last    = $parts[-1]
-        $leading = ($parts[0..($parts.Count-2)] -join '')
-        $t = "$leading.$last"
-      }
-    }
-  }
-  try { return [double]::Parse($t, [System.Globalization.CultureInfo]::InvariantCulture) }
-  catch { return 0 }
-}
-function F2([double]$n) { return [string]::Format($cBR, '{0:N2}', $n) }
-
-$form = New-Object System.Windows.Forms.Form
-$form.Text = 'Alteracao de Preco/Markup'
-$form.Size = New-Object System.Drawing.Size(480, 260)
-$form.StartPosition = 'CenterScreen'
-$form.TopMost = $true
-$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Font
-
-$lblDesc = New-Object System.Windows.Forms.Label
-$lblDesc.Text = $data.descricao
-$lblDesc.AutoSize = $true
-$lblDesc.MaximumSize = New-Object System.Drawing.Size(440, 0)
-$lblDesc.Location = New-Object System.Drawing.Point(12, 12)
-$form.Controls.Add($lblDesc)
-
-$lblCusto = New-Object System.Windows.Forms.Label
-$lblCusto.Text = 'Custo novo: R$ ' + (F2(ToNum($data.custoNovo)))
-$lblCusto.AutoSize = $true
-$lblCusto.Location = New-Object System.Drawing.Point(12, 50)
-$form.Controls.Add($lblCusto)
-
-$lblTipo = New-Object System.Windows.Forms.Label
-$lblTipo.Text = 'Tipo Atualizacao'
-$lblTipo.AutoSize = $true
-$lblTipo.Location = New-Object System.Drawing.Point(12, 86)
-$form.Controls.Add($lblTipo)
-
-$cmbTipo = New-Object System.Windows.Forms.ComboBox
-$cmbTipo.DropDownStyle = 'DropDownList'
-$cmbTipo.Items.AddRange(@('Atualiza Preco','Atualiza Markup'))
-$cmbTipo.SelectedIndex = if ($data.tipo -eq 'markup') { 1 } else { 0 }
-$cmbTipo.Location = New-Object System.Drawing.Point(140, 82)
-$cmbTipo.Size     = New-Object System.Drawing.Size(200, 24)
-$form.Controls.Add($cmbTipo)
-
-$lblMk = New-Object System.Windows.Forms.Label
-$lblMk.Text = 'Markup (%)'
-$lblMk.AutoSize = $true
-$lblMk.Location = New-Object System.Drawing.Point(12, 122)
-$form.Controls.Add($lblMk)
-
-$txtMk = New-Object System.Windows.Forms.TextBox
-$txtMk.Location = New-Object System.Drawing.Point(140, 118)
-$txtMk.Size     = New-Object System.Drawing.Size(200, 24)
-$txtMk.Text     = F2(ToNum($data.markup))
-$form.Controls.Add($txtMk)
-
-$lblPreco = New-Object System.Windows.Forms.Label
-$lblPreco.Text = 'Preco (R$)'
-$lblPreco.AutoSize = $true
-$lblPreco.Location = New-Object System.Drawing.Point(12, 156)
-$form.Controls.Add($lblPreco)
-
-$txtPreco = New-Object System.Windows.Forms.TextBox
-$txtPreco.Location = New-Object System.Drawing.Point(140, 152)
-$txtPreco.Size     = New-Object System.Drawing.Size(200, 24)
-$txtPreco.Text     = F2(ToNum($data.preco))
-$form.Controls.Add($txtPreco)
-
-$custo = ToNum($data.custoNovo)
-$recalc = {
-  if ($cmbTipo.SelectedIndex -eq 0) {
-    $m = ToNum($txtMk.Text)
-    $p = [double]$custo * (1 + ($m/100.0))
-    $txtPreco.Text = F2($p)
-  } else {
-    $p = ToNum($txtPreco.Text)
-    if ($custo -ne 0) {
-      $m = (($p - [double]$custo)/[double]$custo)*100.0
-      $txtMk.Text = F2($m)
-    }
-  }
-}
-$txtMk.Add_TextChanged({ if ($cmbTipo.SelectedIndex -eq 0) { & $recalc } })
-$txtPreco.Add_TextChanged({ if ($cmbTipo.SelectedIndex -eq 1) { & $recalc } })
-$cmbTipo.Add_SelectedIndexChanged({ & $recalc })
-
-$btnOK = New-Object System.Windows.Forms.Button
-$btnOK.Text = 'OK'
-$btnOK.Location = New-Object System.Drawing.Point(240, 190)
-$btnOK.Size     = New-Object System.Drawing.Size(80, 28)
-$btnOK.Add_Click({ $form.DialogResult = [System.Windows.Forms.DialogResult]::OK; $form.Close() })
-$form.AcceptButton = $btnOK
-$form.Controls.Add($btnOK)
-
-$btnCancel = New-Object System.Windows.Forms.Button
-$btnCancel.Text = 'Cancelar'
-$btnCancel.Location = New-Object System.Drawing.Point(330, 190)
-$btnCancel.Size     = New-Object System.Drawing.Size(80, 28)
-$btnCancel.Add_Click({ $form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel; $form.Close() })
-$form.CancelButton = $btnCancel
-$form.Controls.Add($btnCancel)
-
-$null = $form.ShowDialog()
-if ($form.DialogResult -ne [System.Windows.Forms.DialogResult]::OK) { exit 2 }
-
-$result = [ordered]@{
-  tipo   = (if ($cmbTipo.SelectedIndex -eq 0) { 'preco' } else { 'markup' })
-  markup = ToNum($txtMk.Text)
-  preco  = ToNum($txtPreco.Text)
-}
-$result | ConvertTo-Json -Compress | Write-Output
-`.trim();
-
-  // salva com BOM (acentos ok no PS 5.1)
-  const tmpPsPath = path.join(entradaNfeAutomatizada_os.tmpdir(), 'editar-preco-markup.ps1');
-  fs.writeFileSync(tmpPsPath, '\uFEFF' + ps, 'utf8');
-
-  const ps51Candidates = [
-    process.env.SystemRoot ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : null,
-    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-    'powershell.exe'
-  ].filter(Boolean);
-  const psExe = ps51Candidates.find(p => p === 'powershell.exe' ? true : fs.existsSync(p)) || 'powershell.exe';
-
-  console.log(color.info('[WINFORMS] Chamando ' + psExe + ' -STA para "' + (payload?.descricao || 'item') + '"'));
-
-  return await new Promise((resolve) => {
-    const child = entradaNfeAutomatizada_spawn(psExe, [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA',
-      '-File', tmpPsPath
-    ], { stdio: ['pipe', 'pipe', 'inherit'] });
-
-    let out = '';
-    child.on('error', (e) => {
-      console.log(color.warn('[WINFORMS] Falha ao iniciar Windows PowerShell: ' + (e?.message || e)));
-      resolve(null);
-    });
-    child.stdout.on('data', d => out += d.toString('utf8'));
-    child.on('close', (code) => {
-      if (code === 0) {
-        try { resolve(JSON.parse(out.trim())); } catch { resolve(null); }
-      } else {
-        console.log(color.warn('[WINFORMS] Encerrado com codigo ' + code + ' (provavel cancelamento).'));
-        resolve(null);
-      }
-    });
-
-    try { child.stdin.write(JSON.stringify(payload ?? {})); child.stdin.end(); }
-    catch (e) { console.log(color.warn('[WINFORMS] Falha ao escrever STDIN: ' + (e?.message || e))); resolve(null); }
-  });
-}
-
-
-
-// ============================================================================
-// entrada-nfe-automatizada.js — EDITAR MODAL 2 VIA WINFORMS (por linha)
-// Versao ASCII; select do "Tipo Atualizacao" robusto (Preco/Preço)
-// ============================================================================
-async function entradaNfeAutomatizada_editarModal2ViaWinForms(page) {
-  const parseMoedaPtBR = (txt) => {
-    const s = (txt ?? '').toString().replace(/[^\d.,-]/g, '').replace(/\./g, '').replace(',', '.');
-    const n = Number(s);
-    return Number.isFinite(n) ? n : 0;
-  };
-  const parsePercentPtBR = (txt) => {
-    const s = (txt ?? '').toString().replace(/[^\d.,-]/g, '').replace(',', '.');
-    const n = Number(s);
-    return Number.isFinite(n) ? n : 0;
-  };
-  const priceToDigits   = (v) => String(Math.round((Number(v) || 0) * 100));
-  const percentToDigits = (v) => String(Math.round((Number(v) || 0) * 100));
-
-  async function limparMascarado(inp) {
-    try { await inp.click({ force: true }); } catch {}
-    try { await inp.focus(); } catch {}
-    try { await page.keyboard.press('Control+A'); } catch {}
-    for (let i=0;i<10;i++){ try{ await page.keyboard.press('Backspace'); }catch{} await page.waitForTimeout(10); }
-    for (let i=0;i<4;i++){  try{ await page.keyboard.press('Delete');    }catch{} await page.waitForTimeout(10); }
-    await page.waitForTimeout(60);
-  }
-  async function digitarDigits(inp, digits, doTab=true) {
-    for (const ch of String(digits)) { await inp.type(ch, { delay: 15 }); await page.waitForTimeout(8); }
-    if (doTab) { try { await page.keyboard.press('Tab'); } catch {} }
-    await page.waitForTimeout(100);
-  }
-  async function setValorComMascara(inp, digits, textoFallback) {
-    await limparMascarado(inp);
-    await digitarDigits(inp, digits);
-    let val = '';
-    try { val = (await inp.inputValue())?.trim() ?? ''; } catch {}
-    if (val) return true;
-
-    await limparMascarado(inp);
-    await inp.type(textoFallback, { delay: 15 });
-    try { await page.keyboard.press('Tab'); } catch {}
-    await page.waitForTimeout(100);
-    try { val = (await inp.inputValue())?.trim() ?? ''; } catch {}
-    return !!val;
-  }
-
-  const modal = page.locator('[role="dialog"], .modal.show, .modal-dialog').last();
-  await modal.waitFor({ timeout: 15000 });
-
-  const tabela = modal.locator('table').first();
-  await tabela.waitFor({ timeout: 15000 }).catch(() => {});
-
-  // espera tbody com linhas
-  let linhas;
-  for (let tent = 0; tent < 40; tent++) {
-    linhas = await tabela.locator('tbody tr:has(td)').all().catch(() => []);
-    if (linhas && linhas.length > 0) break;
-    await page.waitForTimeout(100);
-  }
-  const qtd = linhas ? linhas.length : 0;
-  console.log(color.info('[WINFORMS] Linhas detectadas no Modal 2: ' + qtd));
-  if (!qtd) {
-    console.log(color.warn('[WINFORMS] Nenhuma linha encontrada no Modal 2. Pulando edicao via WinForms.'));
-    return;
-  }
-
-  const ths  = await tabela.locator('thead th').allTextContents().catch(() => []);
-  const idxCN = ths.findIndex(h => /custo\s*novo/i.test(h));
-
-  for (const row of linhas) {
-    let descricao = '';
-    try {
-      const tds = row.locator('td');
-      if ((await tds.count()) >= 2) descricao = (await tds.nth(1).innerText()).trim();
-    } catch {}
-
-    let custoNovo = 0;
-    try {
-      const tds = row.locator('td');
-      if (idxCN >= 0) custoNovo = parseMoedaPtBR(await tds.nth(idxCN).innerText());
-    } catch {}
-
-    // inputs
-    let inpMarkup = row.getByPlaceholder('Markup').first();
-    if (!(await inpMarkup.count())) inpMarkup = row.getByRole('textbox', { name: /Markup/i }).first();
-
-    let inpPreco  = row.getByPlaceholder(/Pre(?:co|\u00E7o)/i).first();
-    if (!(await inpPreco.count()))  inpPreco  = row.getByRole('textbox', { name: /Pre(?:co|\u00E7o)/i }).first();
-
-    let selTipo   = row.locator('select:has(option:has-text("Atualiza"))').first();
-    if (!(await selTipo.count()))   selTipo   = row.locator('select').filter({ hasText: /Atualiza/i }).first();
-
-    const vMk = (await inpMarkup.count()) ? parsePercentPtBR(await inpMarkup.inputValue().catch(()=>'')) : 0;
-    const vPr = (await inpPreco.count())  ? parseMoedaPtBR(await inpPreco.inputValue().catch(()=>''))    : 0;
-
-    let tipo = 'preco';
-    try {
-      const checked = selTipo.locator('option:checked');
-      if (await checked.count()) {
-        const t = ((await checked.textContent()) || '').toLowerCase();
-        if (t.includes('markup')) tipo = 'markup';
-      }
-    } catch {}
-
-    const saida = await entradaNfeAutomatizada_abrirEditorPrecoMarkupWinForms({
-      descricao, custoNovo, markup: vMk, preco: vPr, tipo
-    });
-    if (!saida) {
-      console.log(color.info('Edicao cancelada ou falhou — mantendo valores para: ' + (descricao || '[linha]')));
-      continue;
-    }
-
-    const custo = Number(custoNovo || 0);
-    let novoMk  = Number(saida.markup || 0);
-    let novoPr  = Number(saida.preco  || 0);
-
-    if (saida.tipo === 'preco') {
-      novoPr = custo * (1 + (novoMk/100));
-    } else {
-      if (custo !== 0) novoMk = ((novoPr - custo)/custo)*100;
-    }
-
-    // selecionar tipo por VALUE baseado no texto
-    if (await selTipo.count()) {
-      try {
-        const handle = await selTipo.elementHandle();
-        const valueToSelect = await handle.evaluate((sel, tipoEscolhido) => {
-          const want = tipoEscolhido === 'markup'
-            ? /Atualiza\s*Markup/i
-            : /Atualiza\s*Pre(?:co|ço)/i;
-          const opt = Array.from(sel.options).find(o => want.test((o.textContent || '')));
-          return opt ? opt.value : null;
-        }, saida.tipo);
-        if (valueToSelect != null) {
-          await selTipo.selectOption({ value: valueToSelect });
-        }
-      } catch {}
-    }
-
-    if (await inpMarkup.count()) {
-      const dig = percentToDigits(novoMk);
-      const txt = (novoMk).toFixed(2).replace('.', ',');
-      const ok  = await setValorComMascara(inpMarkup, dig, txt);
-      if (!ok) console.log(color.warn('Falha ao setar Markup via mascara; verifique no modal.'));
-    }
-
-    if (await inpPreco.count()) {
-      const dig = priceToDigits(novoPr);
-      const txt = (novoPr).toFixed(2).replace('.', ',');
-      const ok  = await setValorComMascara(inpPreco, dig, txt);
-      if (!ok) console.log(color.warn('Falha ao setar Preco via mascara; verifique no modal.'));
-    }
-
-    console.log(color.ok('Aplicado no modal: [' + (saida.tipo === 'markup' ? 'Atualiza Markup' : 'Atualiza Preco') +
-      '] — Markup=' + novoMk.toFixed(2) + '% | Preco=R$ ' + novoPr.toFixed(2) + ' — ' + descricao));
-  }
-}
-
-
-
-
 
 /**
  * ===============================================================
  *  BLOCO 7 — EXECUTAR ENTRADA (SEGUNDO BOTÃO) E TRÍPLICE MODAL
  * ===============================================================
  */
-async function entradaNfeAutomatizada_executarEntradaFinal(page) {
-  // Abre o 2º botão "Executar Entrada"
+async function executarEntradaFinal(page) {
   await clickByText(page, /Executar Entrada/i);
   await page.waitForTimeout(300);
 
-  // Modal 1 — OK automático (se aparecer)
-  try { await clickByText(page, /OK/i, { timeout: 8000 }); } catch { }
-
-  // === GARANTE que o Modal 2 está visível ===
-  const modal2 = page.locator('[role="dialog"], .modal.show, .modal-dialog').last();
-  try { await modal2.waitFor({ timeout: 15000 }); } catch { }
-
-  // === EDIÇÃO VIA WINFORMS (por linha) ===
+  // Modal 1 (OK automático)
   try {
-    await entradaNfeAutomatizada_editarModal2ViaWinForms(page);
-  } catch (e) {
-    console.log(color.warn(`[AVISO] Edição via WinForms falhou: ${e?.message || e}. Você ainda pode editar no navegador.`));
+    await clickByText(page, /OK/i, { timeout: 8000 });
+  } catch { }
+
+  // Modal 2 — instruções (amarelo) + prompt (ciano)
+  console.log(color.warn('\n-------------------------------------------------------------------------------'));
+  console.log(color.warn('\n------------------------------ ANALISE DE MARKUP ------------------------------'));
+  console.log(color.warn('\n-------------------------------------------------------------------------------'));
+  console.log(color.warn('\n--------------- Revise/edite MANUALMENTE este modal no sistema. ---------------'));
+  console.log(color.warn('\n-------------------------------------------------------------------------------'));
+  console.log('Quando terminar a conferência no navegador, volte ao CMD:');
+  await pause('Pressione Enter para o ROBÔ clicar "Confirmar" no modal 2...');
+
+  // tentar localizar o modal 2 visível (com botão Confirmar/Salvar)
+  let modal2 = null;
+  try {
+    await page.waitForSelector('[role="dialog"], .modal.show, .modal-dialog', {
+      state: 'visible',
+      timeout: 15000
+    });
+
+    const candidatos = page
+      .locator('[role="dialog"].show, .modal.show, .modal-dialog')
+      .filter({ has: page.getByRole('button', { name: /Confirmar|Salvar/i }) });
+
+    if (await candidatos.count()) {
+      modal2 = candidatos.last();
+    } else {
+      modal2 = page.locator('[role="dialog"], .modal.show, .modal-dialog').last();
+    }
+  } catch { }
+
+  let btnConfirmar = null;
+  if (modal2) {
+    btnConfirmar = modal2.getByRole('button', { name: /Confirmar/i }).first();
+    if (!(await btnConfirmar.count())) {
+      btnConfirmar = modal2.getByRole('button', { name: /Salvar/i }).first();
+    }
+  } else {
+    btnConfirmar = page.getByRole('button', { name: /Confirmar/i }).last();
+    if (!(await btnConfirmar.count())) {
+      btnConfirmar = page.getByRole('button', { name: /Salvar/i }).last();
+    }
   }
 
-  // ======= PAUSA: você confere/edita o Modal 2 manualmente se quiser =======
-  console.log(color.warn('Revise o Modal 2 no navegador. Quando terminar, volte ao CMD.'));
-  await pause('Pressione Enter para o robô clicar "Confirmar" no Modal 2...');
-
-  // ======= MODO ANTIGO: pegar o ÚLTIMO modal visível e clicar SOMENTE "Confirmar" =======
-  try {
-    await modal2.waitFor({ timeout: 15000 });
-    const btnConfirmar = modal2.getByRole('button', { name: /Confirmar/i }).first(); // SOMENTE "Confirmar"
-    await btnConfirmar.click();
+  if (btnConfirmar && (await btnConfirmar.count())) {
+    await btnConfirmar.click().catch(() => { });
     await waitModalFechar(page);
-    console.log(color.ok('✔ Modal 2 confirmado (modo antigo).'));
-  } catch (e) {
-    console.log(color.err('[X] Não consegui clicar "Confirmar" no Modal 2 (modo antigo).'));
-    await pause('Confirme manualmente no sistema e depois pressione Enter aqui...');
+    console.log(color.ok('✔ Modal 2 confirmado pelo robô.'));
+  } else {
+    console.log(color.warn('[!] Não localizei o botão "Confirmar/Salvar" no modal 2.'));
+    console.log(color.warn('   Se já confirmou manualmente no navegador, continue.'));
+    await pause('Após confirmar manualmente no sistema, aperte Enter aqui...');
     await waitModalFechar(page);
   }
 
-  // Modal 3 — clicar "Não" sempre (se aparecer)
-  try { await clickByText(page, /Não/i, { timeout: 8000 }); } catch { }
+  // Modal 3 (clicar "Não" sempre)
+  try {
+    await clickByText(page, /Não/i, { timeout: 8000 });
+  } catch { }
 }
 
 
@@ -1378,9 +1056,7 @@ async function processarChave(page, chave) {
     const { produtos, linhasCruas } = await coletarProdutosDaTabela(page);
     const selecao = await perguntarIndicesParaEditar(produtos, linhasCruas);
     await editarProdutosSelecionados(page, produtos, selecao);
-    await entradaNfeAutomatizada_executarEntradaFinal(page);
-
-
+    await executarEntradaFinal(page);
 
     console.log('\n' + color.ok(`[OK] Chave ${chave} finalizada com sucesso.`));
     return { sucesso: true };
