@@ -1,29 +1,32 @@
 // INOVEeSHEETS-Perdas — perdas-from-sheets.js
-// Pasta sugerida: C:\\Users\\gusta\\Documents\\AutomacoesPro\\INOVEeSHEETS-Perdas
-// Dependências: npm i playwright googleapis dotenv chalk
+// Pasta sugerida: C:\Users\gusta\Documents\AutomacoesPro\INOVEeSHEETS-Perdas
+// Dependências: npm i playwright googleapis dotenv
 // .env (exemplo):
 // SHEET_ID=1IYKAp2XXTN4ktE4288kGMnzj41xO8TgeTpgobb71hGA
 // SHEET_TAB=Produtos
 // HEADLESS=false
-// GOOGLE_APPLICATION_CREDENTIALS=C:\\Users\\gusta\\Documents\\AutomacoesPro\\INOVEeSHEETS-Perdas\\service-account.json
+// GOOGLE_APPLICATION_CREDENTIALS=C:\Users\gusta\Documents\AutomacoesPro\INOVEeSHEETS-Perdas\service-account.json
 // URL_LOGIN=https://araujopatrocinio.inovautomacao.com.br/login
 // URL_HOME=https://araujopatrocinio.inovautomacao.com.br
 // USUARIO="seu usuario"
 // SENHA="sua senha"
 // EMPRESA_VALUE=1
 // LOTE_GRAVAR=50
+//
+// Novidade: Pré-validação de GTIN (padrão: inicia com "2" e tem 13 dígitos). Itens inválidos não são lançados e são listados no relatório final.
 
 require('dotenv').config();
 const { chromium } = require('playwright');
 const { google } = require('googleapis');
-// Substituímos 'chalk' por funções ANSI para evitar problemas de ESM/CommonJS
+
+// ===== Cores ANSI (sem dependências externas) =====
 const c = {
-  red:    (s) => `[31m${s}[0m`,
-  yellow: (s) => `[33m${s}[0m`,
-  green:  (s) => `[32m${s}[0m`,
-  cyan:   (s) => `[36m${s}[0m`,
-  blue:   (s) => `[34m${s}[0m`,
-  gray:   (s) => `[90m${s}[0m`,
+  red:    (s) => `\x1b[31m${s}\x1b[0m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
+  green:  (s) => `\x1b[32m${s}\x1b[0m`,
+  cyan:   (s) => `\x1b[36m${s}\x1b[0m`,
+  blue:   (s) => `\x1b[34m${s}\x1b[0m`,
+  gray:   (s) => `\x1b[90m${s}\x1b[0m`,
   white:  (s) => `${s}`,
 };
 
@@ -39,7 +42,8 @@ const USUARIO    = process.env.USUARIO || '';
 const SENHA      = process.env.SENHA   || '';
 const EMPRESA_VALUE = String(process.env.EMPRESA_VALUE || '1');
 const LOTE_GRAVAR   = parseInt(process.env.LOTE_GRAVAR || '50', 10);
-// Novos ajustes finos de tempo (ms) após ações críticas
+
+// Ajustes finos de tempo (ms) após ações críticas
 const WAIT_AFTER_GTIN_MS      = parseInt(process.env.WAIT_AFTER_GTIN_MS || '800', 10);   // após Enter no GTIN
 const WAIT_AFTER_QTD_ENTER_MS = parseInt(process.env.WAIT_AFTER_QTD_ENTER_MS || '800', 10); // após Enter em Quantidade
 
@@ -48,7 +52,6 @@ const INCLUIR_TIMEOUT_MS     = parseInt(process.env.INCLUIR_TIMEOUT_MS || '90000
 const INCLUIR_RETRY          = parseInt(process.env.INCLUIR_RETRY || '2', 10);           // tentativas de recuperar tela “Perdas”
 const WAIT_AFTER_GRAVAR_MS   = parseInt(process.env.WAIT_AFTER_GRAVAR_MS || '3000', 10); // respiro após “Gravar”
 const WAIT_AFTER_ABRIR_INCLUIR_MS = parseInt(process.env.WAIT_AFTER_ABRIR_INCLUIR_MS || '600', 10);
-
 
 if (!SHEET_ID) throw new Error('Defina SHEET_ID no .env');
 if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) throw new Error('Defina GOOGLE_APPLICATION_CREDENTIALS no .env');
@@ -73,7 +76,13 @@ async function getSheets() {
 }
 
 function a1Col(n) { // 1->A
-  let s = ''; while (n > 0) { let m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s;
+  let s = '';
+  while (n > 0) {
+    let m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 function toISODate(cell) {
@@ -122,7 +131,7 @@ function indices(headers) {
       const k = normHeader(c);
       if (map[k] !== undefined) return map[k];
     }
-    // busca por aproximação
+    // aproximação
     const want = normHeader(cands[0]);
     const entry = Object.entries(map).find(([k]) => k.includes(want));
     return entry ? entry[1] : -1;
@@ -139,10 +148,7 @@ async function atualizarStatusEmLote(sheets, headers, rowNumbers, novoStatus) {
   const { status } = indices(headers);
   if (status < 0) throw new Error('Coluna "Status" não encontrada na planilha.');
   const colA1 = a1Col(status + 1);
-  const data = rowNumbers.map(() => [novoStatus]);
 
-  const dataRange = `${SHEET_TAB}!${colA1}${Math.min(...rowNumbers)}:${colA1}${Math.max(...rowNumbers)}`;
-  // Preenche as linhas específicas (não contíguas) com batchUpdate via dataFilters
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId: SHEET_ID,
     requestBody: {
@@ -153,11 +159,27 @@ async function atualizarStatusEmLote(sheets, headers, rowNumbers, novoStatus) {
 }
 
 // ==========================
+// HELPERS — GTIN
+// ==========================
+function isDigits(str) {
+  return /^\d+$/.test(str);
+}
+function isValidGtinPattern(gtin) {
+  // Requisito: começa com '2' e tem 13 dígitos
+  return /^2\d{12}$/.test(gtin);
+}
+function reasonForInvalid(gtin) {
+  if (!isDigits(gtin)) return 'contém caracteres não numéricos';
+  if (gtin.length !== 13) return `tamanho != 13 (len=${gtin.length})`;
+  if (!gtin.startsWith('2')) return 'não começa com 2';
+  return 'padrão inválido';
+}
+
+// ==========================
 // HELPERS — Playwright
 // ==========================
 async function fazerLogin(page) {
   await page.goto(URL_LOGIN, { waitUntil: 'domcontentloaded' });
-  // Seletores alinhados com seu recorder
   const codigo = page.getByRole('textbox', { name: 'Codigo' });
   const senha  = page.getByRole('textbox', { name: 'Senha' });
   await codigo.fill(USUARIO);
@@ -171,29 +193,25 @@ async function fazerLogin(page) {
 }
 
 async function irParaPerdas(page) {
-  // Menu → Produto → Perdas
   const btnProduto = page.getByRole('button', { name: 'Produto' });
   await btnProduto.waitFor({ timeout: 15000 });
   await btnProduto.click();
 
-  // O recorder capturou um <p> com texto "Perda"; vamos tentar variações
   let alvoPerdas = page.getByRole('paragraph').filter({ hasText: /Perda[s]?/i }).first();
   if (!(await alvoPerdas.count())) alvoPerdas = page.getByText(/Perda[s]?/i).first();
   await alvoPerdas.click();
   await page.waitForLoadState('networkidle');
 }
 
-// Aguarda a lista de “Perdas” estar pronta (botão Incluir visível e clicável)
 async function esperarTelaListaPerdas(page, timeoutMs = INCLUIR_TIMEOUT_MS) {
   const btn = page.getByRole('button', { name: 'Incluir' }).first();
   await btn.waitFor({ state: 'visible', timeout: timeoutMs });
-  await page.waitForTimeout(200); // pequeno respiro
+  await page.waitForTimeout(200);
   if (await btn.isDisabled().catch(() => false)) {
     await page.waitForTimeout(800);
   }
 }
 
-// Abre “Incluir” com tolerância a lentidão e recarrega o menu se preciso
 async function abrirInclusaoComRetry(page) {
   for (let tent = 0; tent <= INCLUIR_RETRY; tent++) {
     try {
@@ -211,28 +229,17 @@ async function abrirInclusaoComRetry(page) {
   }
 }
 
-
-async function abrirInclusao(page) {
-  const btnIncluir = page.getByRole('button', { name: 'Incluir' });
-  await btnIncluir.waitFor({ timeout: INCLUIR_TIMEOUT_MS });
-  await btnIncluir.click();
-  await page.waitForLoadState('networkidle');
-}
-
 async function preencherData(page, isoDate) {
-  // Tenta input[type=date] (recorder mostrou isso)
   const dateInput = page.locator('input[type="date"]').first();
   if (await dateInput.count()) {
     await dateInput.fill(isoDate);
     return;
   }
-  // Fallback: textbox/label Data
   let dataBox = page.getByRole('textbox', { name: /Data/i }).first();
   if (!(await dataBox.count())) dataBox = page.getByLabel(/Data/i).first();
   if (await dataBox.count()) {
     const [yyyy, mm, dd] = isoDate.split('-');
     await dataBox.click({ clickCount: 3 });
-    // digita DDMMYYYY com pequenas pausas e Enter
     await page.keyboard.type(dd);
     await page.waitForTimeout(80);
     await page.keyboard.type(mm);
@@ -245,26 +252,20 @@ async function preencherData(page, isoDate) {
 }
 
 async function lançarProduto(page, gtin) {
-  // Campo "Código Produto" (segundo seu recorder)
   const codProd = page.getByRole('textbox', { name: 'Código Produto' }).first();
   await codProd.waitFor({ timeout: 15000 });
   await codProd.click();
   await codProd.fill(String(gtin));
   await codProd.press('Enter');
 
-  // Aguarda MAIS tempo para o sistema resolver o GTIN (estoque, preço, etc.)
   await page.waitForTimeout(WAIT_AFTER_GTIN_MS);
 
-  // Após Enter, o sistema deve focar Quantidade; confirmamos com novo Enter
   const qtd = page.getByRole('textbox', { name: 'Quantidade' }).first();
   if (await qtd.count()) {
     await qtd.press('Enter').catch(() => {});
   } else {
-    // Fallback: se não encontrou o campo, envia Enter no teclado mesmo
     await page.keyboard.press('Enter').catch(() => {});
   }
-
-  // Tempo extra depois de confirmar a quantidade
   await page.waitForTimeout(WAIT_AFTER_QTD_ENTER_MS);
 }
 
@@ -273,14 +274,12 @@ async function gravarLote(page) {
   await btnGravar.waitFor({ timeout: 15000 });
   await btnGravar.click();
 
-  // Espera “algo bom” acontecer: toast de sucesso OU networkidle OU timeout de segurança
   await Promise.race([
     page.getByText(/sucesso|gravado|salvo/i).waitFor({ timeout: 60000 }).catch(() => {}),
     page.waitForLoadState('networkidle'),
     page.waitForTimeout(3000),
   ]);
 }
-
 
 // ==========================
 // PIPELINE
@@ -294,8 +293,8 @@ async function gravarLote(page) {
   if (idxData < 0)   throw new Error('Coluna "DATA" não encontrada.');
   if (idxStatus < 0) throw new Error('Coluna "Status" não encontrada.');
 
-  // Filtra apenas itens com Status em branco
-  const itens = rows
+  // Pega pendentes (Status em branco) com GTIN e DATA presentes
+  const pendentes = rows
     .filter(r => !String(r._raw[idxStatus] ?? '').trim())
     .map(r => ({
       rowNumber: r._rowNumber,
@@ -304,10 +303,52 @@ async function gravarLote(page) {
     }))
     .filter(x => x.gtin && x.isoDate);
 
-  if (!itens.length) { console.log(c.green('Nenhum item pendente (Status em branco).')); return; }
+  if (!pendentes.length) {
+    console.log(c.green('Nenhum item pendente (Status em branco).'));
+    return;
+  }
 
-  console.log(c.cyan(`Encontrados ${itens.length} itens pendentes.`));
+  console.log(c.cyan(`Encontrados ${pendentes.length} itens pendentes.`));
 
+  // ===== Pré-análise de GTIN =====
+  const invalidGtins = [];
+  const itens = [];
+  for (const it of pendentes) {
+    const g = it.gtin;
+    if (isValidGtinPattern(g)) {
+      itens.push(it);
+    } else {
+      invalidGtins.push({
+        rowNumber: it.rowNumber,
+        gtin: g,
+        isoDate: it.isoDate,
+        reason: reasonForInvalid(g),
+      });
+    }
+  }
+
+  console.log(c.yellow(`→ ${itens.length} dentro do padrão (^2\\d{12}$).`));
+  console.log(
+    invalidGtins.length
+      ? c.red(`→ ${invalidGtins.length} fora do padrão (não serão lançados).`)
+      : c.green('→ 0 fora do padrão.')
+  );
+
+  // Se não houver itens válidos, não abre navegador; só imprime relatório e encerra
+  if (!itens.length) {
+    if (invalidGtins.length) {
+      console.log(c.yellow('\nRelatório — GTIN fora do padrão (ignorados):'));
+      for (const inv of invalidGtins) {
+        console.log(
+          c.red(`  Linha ${inv.rowNumber} — DATA ${inv.isoDate} — GTIN "${inv.gtin}" — Motivo: ${inv.reason}`)
+        );
+      }
+    }
+    console.log(c.cyan('\nFinalizado (nenhum GTIN válido para lançar).'));
+    return;
+  }
+
+  // ===== Automação Web para itens válidos =====
   const browser = await chromium.launch({ headless: HEADLESS });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -321,47 +362,42 @@ async function gravarLote(page) {
   let processadosNoLote = [];
   let primeiroIsoDaLote = null;
 
-  // Função que grava e marca "Lançado" no Sheets para as linhas do lote
   const fecharLote = async () => {
-  if (!processadosNoLote.length) return;
+    if (!processadosNoLote.length) return;
 
-  // Grava no sistema
-  await gravarLote(page);
+    // Grava no sistema
+    await gravarLote(page);
 
-  // Respiro extra para sistemas lentos
-  await page.waitForTimeout(WAIT_AFTER_GRAVAR_MS);
+    // Respiro extra
+    await page.waitForTimeout(WAIT_AFTER_GRAVAR_MS);
 
-  // Garante que voltamos à tela com o botão Incluir
-  try {
-    await esperarTelaListaPerdas(page);
-  } catch (_) {
-    // Se não voltou automaticamente, reabre via menu
-    await irParaPerdas(page);
-    await esperarTelaListaPerdas(page);
-  }
+    // Garante que voltamos à tela com o botão Incluir
+    try {
+      await esperarTelaListaPerdas(page);
+    } catch (_) {
+      await irParaPerdas(page);
+      await esperarTelaListaPerdas(page);
+    }
 
-  // Só depois de confirmar que a UI voltou, marcamos no Sheets
-  await atualizarStatusEmLote(sheets, headers, processadosNoLote, 'Lançado');
-  console.log(c.green(`✔ Lote gravado e ${processadosNoLote.length} item(ns) marcados como Lançado no Sheets.`));
+    // Marca no Sheets
+    await atualizarStatusEmLote(sheets, headers, processadosNoLote, 'Lançado');
+    console.log(c.green(`✔ Lote gravado e ${processadosNoLote.length} item(ns) marcados como Lançado no Sheets.`));
 
-  processadosNoLote = [];
-  primeiroIsoDaLote = null;
-};
-
+    processadosNoLote = [];
+    primeiroIsoDaLote = null;
+  };
 
   for (let i = 0; i < itens.length; i++) {
     const item = itens[i];
 
-    // 4) Incluir (se for o primeiro do lote)
+    // Abre inclusão e define data para o primeiro do lote (ou quando a data mudar)
     if (processadosNoLote.length === 0) {
       await abrirInclusaoComRetry(page);
       primeiroIsoDaLote = item.isoDate;
-      // 5) Preencher Data (da planilha)
       await preencherData(page, item.isoDate);
       await page.waitForTimeout(150);
     }
 
-    // Se data mudar no meio, fecha lote e reabre com nova data
     if (primeiroIsoDaLote && item.isoDate !== primeiroIsoDaLote) {
       console.log(c.yellow(`↪ Data mudou de ${primeiroIsoDaLote} para ${item.isoDate}. Gravando lote atual e abrindo novo.`));
       await fecharLote();
@@ -369,15 +405,12 @@ async function gravarLote(page) {
       primeiroIsoDaLote = item.isoDate;
       await preencherData(page, item.isoDate);
     }
-    // Log do item (azul)
+
     console.log(c.blue(`→ Lançando item ${i+1}/${itens.length} (linha ${item.rowNumber}) — DATA ${item.isoDate} — GTIN ${item.gtin}`));
 
-    // 6–8) Código Produto = GTIN, Enter; esperar ~0,5s; Enter em Quantidade
     await lançarProduto(page, item.gtin);
-
     processadosNoLote.push(item.rowNumber);
 
-    // 9) A cada LOTE_GRAVAR produtos, clicar em Gravar
     if (processadosNoLote.length >= LOTE_GRAVAR) {
       await fecharLote();
     }
@@ -389,13 +422,22 @@ async function gravarLote(page) {
   await context.close();
   await browser.close();
 
+  // ===== Relatório final de inválidos =====
+  if (invalidGtins.length) {
+    console.log(c.yellow('\nRelatório — GTIN fora do padrão (ignorados):'));
+    for (const inv of invalidGtins) {
+      console.log(
+        c.red(`  Linha ${inv.rowNumber} — DATA ${inv.isoDate} — GTIN "${inv.gtin}" — Motivo: ${inv.reason}`)
+      );
+    }
+  }
+
   console.log(c.cyan('\nFinalizado.'));
 })().catch(err => {
   const rawMsg = (err && (err.message || err.status || err.code)) || '';
   const causeMsg = (err && err.cause && (err.cause.message || err.cause.status || err.cause.code)) || '';
   const full = `${rawMsg} ${causeMsg}`.toLowerCase();
 
-  // Dicas específicas para erros comuns do Google Sheets
   if (full.includes('sheets api has not been used') || full.includes('it is disabled') || full.includes('permission_denied')) {
     console.error(c.red(`\n[Erro] Google Sheets API não habilitada para este projeto GCP.`));
     console.error(`  Projeto (número): 613989212968`);
