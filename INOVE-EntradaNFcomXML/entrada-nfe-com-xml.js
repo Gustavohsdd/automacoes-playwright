@@ -14,6 +14,10 @@ const os = require('os');
 const AdmZip = require('adm-zip');
 const { XMLParser } = require('fast-xml-parser');
 
+// <<< LINHA CORRIGIDA E COM DEBUG ABAIXO >>>
+const pdfParser = require('pdf-parse');
+console.log('DEBUG: O tipo do pdfParser importado é:', typeof pdfParser); // <- ADICIONADO PARA DEBUG
+
 // ===== CLR com RGB (Truecolor) e compatibilidade com API antiga =====
 globalThis.CLR ??= (() => {
   const ESC = '\x1b[';
@@ -1174,7 +1178,7 @@ async function processarNota(page, chave, xmlContent) {
 
 /**
  * ===============================================================
- * BLOCO 9 — ROTINA PRINCIPAL (MAIN)
+ * BLOCO 9 — ROTINA PRINCIPAL (MAIN) - CORREÇÃO FINAL DA REGEX
  * ===============================================================
  */
 (async () => {
@@ -1236,14 +1240,14 @@ async function processarNota(page, chave, xmlContent) {
     return;
   }
 
-  // ----- FASE 2: IDENTIFICAR TAREFAS NA TABELA FILTRADA -----
+  // ----- FASE 2: IDENTIFICAR TAREFAS A PARTIR DO RELATÓRIO PDF -----
   const chavesParaProcessar = [];
   try {
     console.log(color.info('\nConfigurando filtro de notas pendentes...'));
     await page.getByRole('button', { name: 'Dados de Pesquisa' }).click();
     await page.waitForTimeout(500); // Aguarda o painel abrir
 
-    // --- PERGUNTAR DATAS (ANTIGA MELHORIA 1: ENTER MANTÉM PADRÃO) ---
+    // --- PERGUNTAR DATAS ---
     console.log(color.section('\n======================================================================'));
     console.log(color.section('FILTRO: Período de Emissão (Enter para manter valor padrão)'));
     console.log(color.section('======================================================================'));
@@ -1252,30 +1256,25 @@ async function processarNota(page, chave, xmlContent) {
     const dataFinalStr = await prompt('Digite a DATA FINAL (formato DD/MM/AAAA):');
 
     const parseAndNormalizeDate = (dateStr) => {
-      // Tenta DD/MM/AAAA
-      const match = dateStr.match(/^(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})$/);
+      const match = dateStr.match(/^(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})/);
       if (match) {
         const [_, d, m, y] = match;
-        // Converte para AAAA-MM-DD para preenchimento
         return { fill: `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`, type: `${d.padStart(2, '0')}${m.padStart(2, '0')}${y.padStart(4, '20')}` };
       }
       throw new Error('Formato de data inválido. Use DD/MM/AAAA.');
     };
 
-    // Localiza os campos de input de data
     let inpDataIni = page.locator('ia-input-list').filter({ hasText: 'Inicial' }).locator('#DataEmissao').first();
     if (!(await inpDataIni.count())) inpDataIni = page.locator('input#DataEmissao').first();
     
     let inpDataFim = page.locator('ia-input-list').filter({ hasText: 'Final' }).locator('#DataEmissao2').first();
     if (!(await inpDataFim.count())) inpDataFim = page.locator('input#DataEmissao2').first();
     
-    // Processa Data Inicial (campo #DataEmissao)
     if (inpDataIni.count() && dataInicialStr.trim()) {
       try {
         const dataInicial = parseAndNormalizeDate(dataInicialStr);
         await inpDataIni.focus();
         await inpDataIni.click();
-        // Digitação manual (caractere por caractere) para contornar máscaras
         await inpDataIni.press('Control+A');
         await inpDataIni.press('Delete');
         await page.keyboard.type(dataInicial.type, { delay: 50 });
@@ -1292,13 +1291,11 @@ async function processarNota(page, chave, xmlContent) {
       console.log(color.warn('[AVISO] Campo Data Inicial (Emissão) não localizado.'));
     }
 
-    // Processa Data Final (campo #DataEmissao2)
     if (inpDataFim.count() && dataFinalStr.trim()) {
       try {
         const dataFinal = parseAndNormalizeDate(dataFinalStr);
         await inpDataFim.focus();
         await inpDataFim.click();
-        // Digitação manual (caractere por caractere) para contornar máscaras
         await inpDataFim.press('Control+A');
         await inpDataFim.press('Delete');
         await page.keyboard.type(dataFinal.type, { delay: 50 });
@@ -1316,67 +1313,88 @@ async function processarNota(page, chave, xmlContent) {
     }
     
     console.log(color.section('----------------------------------------------------------------------\n'));
-    // --- FIM PERGUNTAR DATAS ---
 
     // Filtro de Entrada = Não (N)
     await page.locator('select[name="Entrada"]').selectOption('N');
-
     await page.getByRole('button', { name: /Pesquisar/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1500); // Stabilidade
+    await page.waitForTimeout(1500);
 
-    // --- INÍCIO MELHORIA 1: ORDENAR PELA COLUNA "XML" ---
-    console.log(color.info('Ordenando a tabela para priorizar notas com XML "Sim"...'));
-    try {
-        const headerXML = page.locator('table thead th').filter({ hasText: /XML/i }).first();
-        await headerXML.waitFor({ timeout: 10000 });
-        // Clica duas vezes para ordenar em ordem decrescente (Sim > Não)
-        await headerXML.dblclick();
-        await page.waitForTimeout(2000); // Pausa para a UI/servidor aplicar a ordenação
-        console.log(color.ok('✔ Tabela ordenada por "XML".'));
-    } catch (e) {
-        console.log(color.warn(`[AVISO] Não foi possível ordenar a tabela pela coluna "XML". Prosseguindo sem ordenação. Erro: ${e.message}`));
+    console.log(color.info('Interceptando o download do relatório PDF via rede...'));
+    const pdfPromise = new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            page.off('response', responseListener);
+            reject(new Error('Timeout: O PDF do relatório não foi recebido da rede em 30 segundos.'));
+        }, 30000);
+        const responseListener = async (response) => {
+            const contentType = response.headers()['content-type'] || '';
+            if (contentType.includes('application/pdf')) {
+                console.log(color.ok(`✔ Resposta com PDF interceptada da URL: ${response.url()}`));
+                try {
+                    const buffer = await response.body();
+                    clearTimeout(timeoutId);
+                    page.off('response', responseListener);
+                    resolve(buffer);
+                } catch (err) {
+                    clearTimeout(timeoutId);
+                    page.off('response', responseListener);
+                    reject(err);
+                }
+            }
+        };
+        page.on('response', responseListener);
+    });
+    await page.getByRole('button', { name: /Relatório/i }).click();
+    const pdfBuffer = await pdfPromise;
+    console.log(color.ok('✔ Relatório PDF capturado com sucesso da rede.'));
+
+    console.log(color.info('Analisando texto extraído do PDF...'));
+    const data = await pdfParser(pdfBuffer);
+    const pdfText = data.text;
+
+    // ======================== LÓGICA DE MAPEAMENTO POR ORDEM ========================
+    // <<< LINHA CORRIGIDA ABAIXO >>>
+    const chavesRegex = /\d{44}/g; // 'g' para encontrar TODAS as sequências de 44 dígitos
+    const statusRegex = /(SimNão|SimSim|NãoNão|NãoSim)/g; // Encontra todos os pares de status
+
+    const chavesEncontradas = pdfText.match(chavesRegex) || [];
+    const statusEncontrados = pdfText.match(statusRegex) || [];
+
+    if (chavesEncontradas.length !== statusEncontrados.length) {
+        console.log(color.warn(`[AVISO] O número de chaves (${chavesEncontradas.length}) não corresponde ao número de status (${statusEncontrados.length}). A análise pode ser imprecisa.`));
     }
-    // --- FIM MELHORIA 1 ---
 
-    console.log(color.info('Analisando a tabela de resultados...'));
-    const table = page.locator('table').first();
-    const headers = (await table.locator('thead th').allTextContents()).map(h => h.trim().toLowerCase());
+    // Usa o menor dos dois comprimentos para evitar erros de índice
+    const loopLimit = Math.min(chavesEncontradas.length, statusEncontrados.length);
 
-    const chaveIndex = headers.findIndex(h => h.includes('chave'));
-    const xmlIndex = headers.findIndex(h => h.includes('xml'));
-    const entradaIndex = headers.findIndex(h => h.includes('entrada'));
+    for (let i = 0; i < loopLimit; i++) {
+        const chave = chavesEncontradas[i];
+        const statusPar = statusEncontrados[i];
 
-    if (chaveIndex === -1 || xmlIndex === -1 || entradaIndex === -1) {
-      throw new Error('Não foi possível encontrar as colunas "Chave", "XML" e "Entrada" na tabela.');
-    }
-
-    const rows = await table.locator('tbody tr').all();
-    for (const row of rows) {
-      const cells = row.locator('td');
-      const xmlStatus = (await cells.nth(xmlIndex).innerText()).trim();
-      const entradaStatus = (await cells.nth(entradaIndex).innerText()).trim();
-
-      if (/sim/i.test(xmlStatus) && /(não|nao)/i.test(entradaStatus)) {
-        const chave = (await cells.nth(chaveIndex).innerText()).trim();
-        if (xmlDataMap.has(chave)) {
-          chavesParaProcessar.push(chave);
-        } else {
-          console.log(color.warn(` -> Nota ${chave} na tabela não possui um XML correspondente local. Será ignorada.`));
+        // A condição que queremos é XML="Sim" e Entrada="Não"
+        if (statusPar === 'SimNão') {
+            if (xmlDataMap.has(chave)) {
+                chavesParaProcessar.push(chave);
+            } else {
+                console.log(color.warn(` -> Chave ${chave} (status 'SimNão') não possui XML local. Será ignorada.`));
+            }
         }
-      }
     }
+    // ==============================================================================
+
   } catch (err) {
-    console.error(color.err(`Erro ao analisar a tabela de notas: ${err.message}`));
+    console.error(color.err(`Erro ao analisar o relatório de notas: ${err.message}`));
+    console.error(err.stack);
     await browser.close();
     return;
   }
 
   // ----- FASE 3: EXECUÇÃO DO PROCESSAMENTO -----
   if (chavesParaProcessar.length === 0) {
-    console.log(color.warn('\nNenhuma nota com XML="Sim" e Entrada="Não" foi encontrada para processar.'));
+    console.log(color.warn('\nNenhuma nota com XML="Sim" e Entrada="Não" foi encontrada no relatório para processar.'));
   } else {
-    console.log(color.ok(`\nEncontradas ${chavesParaProcessar.length} notas para dar entrada. Iniciando processo...`));
+    chavesParaProcessar.sort();
+    console.log(color.ok(`\nEncontradas ${chavesParaProcessar.length} notas no relatório para dar entrada. Iniciando processo...`));
   }
 
   for (const chave of chavesParaProcessar) {
@@ -1384,7 +1402,6 @@ async function processarNota(page, chave, xmlContent) {
       console.log('\n' + color.info('[INFO] Sessão expirada. Fazendo login novamente...'));
       await fazerLogin(page);
     }
-    // Sempre garante que estamos na tela certa antes de processar
     await irParaImportacao(page);
 
     const xmlContent = xmlDataMap.get(chave);
