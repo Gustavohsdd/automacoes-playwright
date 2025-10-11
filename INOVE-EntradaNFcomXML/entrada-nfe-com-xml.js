@@ -1043,6 +1043,7 @@ async function executarEntradaFinal(page) {
 async function processarNota(page, chave, xmlContent) {
   try {
     console.log(color.section(`\n==============================\nProcessando CHAVE: ${chave}\n==============================`));
+    // Esta função agora é chamada com o XML já encontrado, então a lógica interna não muda.
     await iniciarEntradaComDadosXML(page, chave, xmlContent);
     await irParaAbaDadosDoProdutos(page);
 
@@ -1054,8 +1055,11 @@ async function processarNota(page, chave, xmlContent) {
     console.log('\n' + color.ok(`[OK] Chave ${chave} finalizada com sucesso.`));
     return { sucesso: true };
   } catch (err) {
-    console.error(color.err(`[ERRO] Falhou na chave ${chave}: ${err.message}`));
-    console.error(err.stack); // Adiciona mais detalhes do erro
+    // Log detalhado do erro para depuração
+    console.error(color.err(`[ERRO] Falhou ao processar a chave ${chave}: ${err.message}`));
+    console.error(err.stack);
+    // Pausa para que o usuário possa ver o erro antes de continuar
+    await pause('Ocorreu um erro nesta nota. Pressione Enter para tentar a próxima...');
     return { sucesso: false, erro: err.message };
   }
 }
@@ -1071,35 +1075,31 @@ async function processarNota(page, chave, xmlContent) {
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  // ----- LOGIN E NAVEGAÇÃO INICIAL -----
+  // ----- FASE 0: LOGIN E PREPARAÇÃO DO AMBIENTE -----
   await fazerLogin(page);
   await irParaImportacao(page);
 
-  // ----- PREPARAR AMBIENTE PARA XMLs -----
-  const tempDir = path.join(os.tmpdir(), `xmls_nfe_${Date.now()}`);
-  if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+  // Limpeza de pastas antigas e criação de uma nova
+  const systemTempDir = os.tmpdir();
+  const folderPrefix = 'xmls_nfe_';
+  try {
+    const allTempFiles = fs.readdirSync(systemTempDir);
+    allTempFiles.forEach(fileOrDir => {
+      if (fileOrDir.startsWith(folderPrefix)) {
+        fs.rmSync(path.join(systemTempDir, fileOrDir), { recursive: true, force: true });
+      }
+    });
+  } catch (e) { /* Ignora falhas na limpeza */ }
+  const tempDir = path.join(systemTempDir, `${folderPrefix}${Date.now()}`);
   fs.mkdirSync(tempDir);
-  console.log(color.info(`Pasta temporária para XMLs criada em: ${tempDir}`));
+  console.log(color.ok(`Pasta temporária limpa e criada em: ${tempDir}`));
 
-  let xmlFiles = [];
   const resultados = [];
+  const xmlDataMap = new Map();
 
   try {
-    // ----- FILTRAR NOTAS COM ENTRADA "NÃO" -----
-    console.log(color.info('Filtrando notas com Entrada = "Não"...'));
-    await page.getByRole('button', { name: 'Dados de Pesquisa' }).click();
-    await page.locator('select[name="Entrada"]').selectOption('N');
-
-    // --> CORREÇÃO: Clicar em "Pesquisar" para aplicar o filtro antes de baixar.
-    console.log(color.info('Aplicando filtro e aguardando resultados...'));
-    await page.getByRole('button', { name: /Pesquisar/i }).click();
-    await page.waitForLoadState('networkidle'); // Espera a tabela carregar com os dados filtrados.
-
-    console.log(color.ok('Filtro aplicado. Aguardando sistema carregar...'));
-    await page.waitForTimeout(2000); // Garante que a UI atualize
-
-    // ----- BAIXAR O ARQUIVO ZIP COM OS XMLs FILTRADOS -----
-    console.log(color.info('Iniciando download do arquivo ZIP com os XMLs...'));
+    // ----- FASE 1: BAIXAR E INDEXAR TODOS OS XMLs -----
+    console.log(color.info('\nIniciando download do arquivo ZIP com todos os XMLs...'));
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Exportar XML' }).click();
     const download = await downloadPromise;
@@ -1107,67 +1107,96 @@ async function processarNota(page, chave, xmlContent) {
     await download.saveAs(downloadPath);
     console.log(color.ok(`Download concluído: ${download.suggestedFilename()}`));
 
-    // ----- DESCOMPACTAR O ZIP -----
-    console.log(color.info('Descompactando arquivos XML...'));
+    console.log(color.info('Descompactando e indexando XMLs...'));
     const zip = new AdmZip(downloadPath);
     zip.extractAllTo(tempDir, true);
-    fs.unlinkSync(downloadPath); // Apaga o ZIP após extrair
+    fs.unlinkSync(downloadPath);
 
-    xmlFiles = fs.readdirSync(tempDir).filter(f => f.toLowerCase().endsWith('.xml'));
-    if (xmlFiles.length === 0) {
-      console.log(color.warn('Nenhum arquivo XML encontrado no ZIP para processar.'));
-    } else {
-      console.log(color.ok(`${xmlFiles.length} XMLs encontrados e prontos para processar.`));
+    const xmlFiles = fs.readdirSync(tempDir).filter(f => f.toLowerCase().endsWith('.xml'));
+    for (const xmlFile of xmlFiles) {
+      const xmlPath = path.join(tempDir, xmlFile);
+      const xmlContent = fs.readFileSync(xmlPath, 'utf8');
+      const match = xmlContent.match(/<infNFe[^>]*Id="NFe(\d{44})"/);
+      if (match && match[1]) {
+        xmlDataMap.set(match[1], xmlContent); // Mapeia Chave -> Conteúdo do XML
+      }
     }
+    console.log(color.ok(`${xmlDataMap.size} XMLs foram lidos e indexados na memória.`));
 
   } catch (err) {
-    console.error(color.err(`Erro na fase de preparação (filtro/download/unzip): ${err.message}`));
-    console.error(err.stack);
+    console.error(color.err(`Erro na fase de preparação (download/indexação): ${err.message}`));
+    await browser.close();
+    return;
+  }
+
+  // ----- FASE 2: IDENTIFICAR TAREFAS NA TABELA FILTRADA -----
+  const chavesParaProcessar = [];
+  try {
+    console.log(color.info('\nFiltrando a tabela para encontrar notas pendentes...'));
+    await page.getByRole('button', { name: 'Dados de Pesquisa' }).click();
+    await page.locator('select[name="Entrada"]').selectOption('N');
+    await page.getByRole('button', { name: /Pesquisar/i }).click();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1500); // Stabilidade
+
+    console.log(color.info('Analisando a tabela de resultados...'));
+    const table = page.locator('table').first();
+    const headers = (await table.locator('thead th').allTextContents()).map(h => h.trim().toLowerCase());
+    
+    const chaveIndex = headers.findIndex(h => h.includes('chave'));
+    const xmlIndex = headers.findIndex(h => h.includes('xml'));
+    const entradaIndex = headers.findIndex(h => h.includes('entrada'));
+
+    if (chaveIndex === -1 || xmlIndex === -1 || entradaIndex === -1) {
+      throw new Error('Não foi possível encontrar as colunas "Chave", "XML" e "Entrada" na tabela.');
+    }
+
+    const rows = await table.locator('tbody tr').all();
+    for (const row of rows) {
+      const cells = row.locator('td');
+      const xmlStatus = (await cells.nth(xmlIndex).innerText()).trim();
+      const entradaStatus = (await cells.nth(entradaIndex).innerText()).trim();
+
+      if (/sim/i.test(xmlStatus) && /(não|nao)/i.test(entradaStatus)) {
+        const chave = (await cells.nth(chaveIndex).innerText()).trim();
+        if (xmlDataMap.has(chave)) {
+          chavesParaProcessar.push(chave);
+        } else {
+          console.log(color.warn(` -> Nota ${chave} na tabela não possui um XML correspondente local. Será ignorada.`));
+        }
+      }
+    }
+  } catch (err) {
+    console.error(color.err(`Erro ao analisar a tabela de notas: ${err.message}`));
     await browser.close();
     return;
   }
   
-  // --> CORREÇÃO: Garante que a automação volte para a tela de pesquisa antes do loop.
-  // Isso "reseta" a visualização e evita o erro de timeout no primeiro item.
-  await irParaImportacao(page);
+  // ----- FASE 3: EXECUÇÃO DO PROCESSAMENTO -----
+  if (chavesParaProcessar.length === 0) {
+    console.log(color.warn('\nNenhuma nota com XML="Sim" e Entrada="Não" foi encontrada para processar.'));
+  } else {
+    console.log(color.ok(`\nEncontradas ${chavesParaProcessar.length} notas para dar entrada. Iniciando processo...`));
+  }
 
-
-  // ----- LOOP PRINCIPAL PARA PROCESSAR CADA XML -----
-  for (const xmlFile of xmlFiles) {
-    const xmlPath = path.join(tempDir, xmlFile);
-    const xmlContent = fs.readFileSync(xmlPath, 'utf8');
-
-    // Extrai a chave de acesso do conteúdo do XML
-    const match = xmlContent.match(/<infNFe[^>]*Id="NFe(\d{44})"/);
-    if (!match || !match[1]) {
-      console.log(color.err(`Não foi possível extrair a chave do arquivo: ${xmlFile}. Pulando...`));
-      resultados.push({ chave: xmlFile, sucesso: false, erro: 'Chave não encontrada no XML' });
-      continue;
-    }
-    const chave = match[1];
-
-    // Verifica se a sessão expirou
+  for (const chave of chavesParaProcessar) {
     if (await isOnLogin(page)) {
       console.log('\n' + color.info('[INFO] Sessão expirada. Fazendo login novamente...'));
       await fazerLogin(page);
-      await irParaImportacao(page);
-    } else if (!(await isOnPesquisaImportacao(page))) {
-      await irParaImportacao(page);
     }
-
+    // Sempre garante que estamos na tela certa antes de processar
+    await irParaImportacao(page);
+    
+    const xmlContent = xmlDataMap.get(chave);
     const r = await processarNota(page, chave, xmlContent);
     resultados.push({ chave, ...r });
-
-    await page.waitForTimeout(400);
   }
 
   // ----- LIMPEZA E RESUMO FINAL -----
   try {
     fs.rmSync(tempDir, { recursive: true, force: true });
-    console.log(color.info('Pasta temporária de XMLs foi removida.'));
-  } catch (e) {
-    console.log(color.warn(`Não foi possível remover a pasta temporária: ${tempDir}`));
-  }
+    console.log(color.info('\nPasta temporária desta sessão foi removida.'));
+  } catch (e) { /* Ignora erro na limpeza final */ }
 
   console.log('\n' + color.section('================ RESUMO FINAL ================'));
   const ok = resultados.filter(x => x.sucesso);
@@ -1184,5 +1213,3 @@ async function processarNota(page, chave, xmlContent) {
   await context.close();
   await browser.close();
 })();
-
-
