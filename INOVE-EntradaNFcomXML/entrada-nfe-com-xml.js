@@ -18,7 +18,7 @@ const { XMLParser } = require('fast-xml-parser');
 globalThis.CLR ??= (() => {
   const ESC = '\x1b[';
   const reset = `${ESC}0m`;
-  const bold  = `${ESC}1m`;
+  const bold = `${ESC}1m`;
 
   // Detecção de profundidade e fallback automático
   const depth = (() => {
@@ -28,62 +28,62 @@ globalThis.CLR ??= (() => {
 
   // Fallback p/ 8/16 cores
   const BASIC = [
-    { code: 30, rgb: [0,0,0] }, { code: 31, rgb: [205,49,49] },
-    { code: 32, rgb: [13,188,121] }, { code: 33, rgb: [229,229,16] },
-    { code: 34, rgb: [36,114,200] }, { code: 35, rgb: [188,63,188] },
-    { code: 36, rgb: [17,168,205] }, { code: 37, rgb: [229,229,229] },
-    { code: 90, rgb: [128,128,128] },
+    { code: 30, rgb: [0, 0, 0] }, { code: 31, rgb: [205, 49, 49] },
+    { code: 32, rgb: [13, 188, 121] }, { code: 33, rgb: [229, 229, 16] },
+    { code: 34, rgb: [36, 114, 200] }, { code: 35, rgb: [188, 63, 188] },
+    { code: 36, rgb: [17, 168, 205] }, { code: 37, rgb: [229, 229, 229] },
+    { code: 90, rgb: [128, 128, 128] },
   ];
-  const nearestBasicCode = (r,g,b) => {
+  const nearestBasicCode = (r, g, b) => {
     let best = BASIC[0], bestD = Infinity;
     for (const c of BASIC) {
       const dr = r - c.rgb[0], dg = g - c.rgb[1], db = b - c.rgb[2];
-      const d = dr*dr + dg*dg + db*db;
+      const d = dr * dr + dg * dg + db * db;
       if (d < bestD) { bestD = d; best = c; }
     }
     return best.code;
   };
 
-  const fg = (r,g,b) => truecolor ? `${ESC}38;2;${r};${g};${b}m` : `${ESC}${nearestBasicCode(r,g,b)}m`;
-  const bg = (r,g,b) => {
+  const fg = (r, g, b) => truecolor ? `${ESC}38;2;${r};${g};${b}m` : `${ESC}${nearestBasicCode(r, g, b)}m`;
+  const bg = (r, g, b) => {
     if (truecolor) return `${ESC}48;2;${r};${g};${b}m`;
-    const c = nearestBasicCode(r,g,b);
+    const c = nearestBasicCode(r, g, b);
     return `${ESC}${(c >= 90 ? c + 10 : c + 10)}m`; // 30–37->40–47, 90–97->100–107
   };
-  const wrap = (txt, r,g,b, opts = {}) =>
-    `${opts.bg ? bg(r,g,b) : fg(r,g,b)}${opts.bold ? bold : ''}${txt}${reset}`;
+  const wrap = (txt, r, g, b, opts = {}) =>
+    `${opts.bg ? bg(r, g, b) : fg(r, g, b)}${opts.bold ? bold : ''}${txt}${reset}`;
 
   // === SUA PALETA CENTRAL (troque só estes números para mudar tudo) ===
   // helper: HEX -> [r,g,b]
-const hexToRgb = (hex) => {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!m) throw new Error('HEX inválido: ' + hex);
-  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
-};
+  const hexToRgb = (hex) => {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (!m) throw new Error('HEX inválido: ' + hex);
+    return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  };
 
-// edite aqui com o picker do VS Code (clique na cor)
-const PALETTE_HEX = {
-  cyan:    '#00B4FF', // perguntas
-  green:   '#00C800', // sucesso
-  red:     '#DC1E1E', // erro
-  yellow:  '#FFC800', // atenção
-  blue:    '#5078FF',
-  magenta: '#f1a009',
-  gray:    '#969696',
-};
+  // edite aqui com o picker do VS Code (clique na cor)
+  const PALETTE_HEX = {
+    cyan: '#00B4FF', // perguntas
+    green: '#00C800', // sucesso
+    red: '#DC1E1E', // erro
+    yellow: '#FFC800', // atenção
+    blue: '#5078FF',
+    magenta: '#f1a009',
+    gray: '#969696',
+  };
 
-// converte p/ a paleta que o CLR usa internamente
-const PALETTE = Object.fromEntries(
-  Object.entries(PALETTE_HEX).map(([k, hex]) => [k, hexToRgb(hex)])
-);
+  // converte p/ a paleta que o CLR usa internamente
+  const PALETTE = Object.fromEntries(
+    Object.entries(PALETTE_HEX).map(([k, hex]) => [k, hexToRgb(hex)])
+  );
 
   // Gera propriedades compatíveis: CLR.cyan, CLR.red, etc. (foreground)
   const named = Object.fromEntries(
-    Object.entries(PALETTE).map(([k, [r,g,b]]) => [k, fg(r,g,b)])
+    Object.entries(PALETTE).map(([k, [r, g, b]]) => [k, fg(r, g, b)])
   );
   // Versões de fundo: CLR.bgCyan, CLR.bgRed, etc.
   const bgNamed = Object.fromEntries(
-    Object.entries(PALETTE).map(([k, [r,g,b]]) => [`bg${k[0].toUpperCase()+k.slice(1)}`, bg(r,g,b)])
+    Object.entries(PALETTE).map(([k, [r, g, b]]) => [`bg${k[0].toUpperCase() + k.slice(1)}`, bg(r, g, b)])
   );
 
   return { reset, bold, fg, bg, wrap, ...named, ...bgNamed };
@@ -127,7 +127,7 @@ function sanitizeForCmd(x) {
       .replace(/✔/g, '[OK]')
       .replace(/✖/g, '[X]')
       .replace(/⚠/g, '[!]');
-    }
+  }
 
   // normaliza quebras de linha para o Windows (evita duplicidade visual)
   s = s.replace(/\r?\n/g, EOL);
@@ -284,11 +284,14 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
 
   const fornecedor = infNFe.emit?.xNome || 'Não encontrado';
   const natOp = infNFe.ide?.natOp || 'Não encontrada';
-  let produtos = infNFe.det;
-  if (produtos && !Array.isArray(produtos)) {
-    produtos = [produtos]; // Garante que seja sempre um array
+
+  let produtosXml = infNFe.det;
+  if (produtosXml && !Array.isArray(produtosXml)) {
+    produtosXml = [produtosXml]; // Garante que seja sempre um array
+  } else if (!produtosXml) {
+    produtosXml = []; // Garante que nunca seja nulo
   }
-  const descricoesProdutos = produtos.map(p => p.prod?.xProd || 'Descrição não encontrada');
+  const descricoesProdutos = produtosXml.map(p => p.prod?.xProd || 'Descrição não encontrada');
 
   // 2. Pesquisa a chave no sistema para iniciar a entrada
   // --> CORREÇÃO: Garante que o painel de pesquisa esteja aberto e aguarda a UI
@@ -306,8 +309,27 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
   }).first();
   await row.waitFor({ timeout: 15000 });
   await row.click();
-  await clickByText(page, /Executar Entrada/i);
-  await page.waitForLoadState('networkidle');
+  
+  // --- INÍCIO MELHORIA 2: TRATAMENTO DE BOTÃO "Executar Entrada" (Timeout 3000ms) ---
+  try {
+    // Reduzido o timeout de 15000ms para 3000ms
+    await clickByText(page, /Executar Entrada/i, { timeout: 3000 });
+    await page.waitForLoadState('networkidle');
+  } catch (err) {
+    // Se o botão não for encontrado após 3s (timeout), exibe a mensagem de aviso e pausa.
+    console.log(color.warn('\n--- Não foi possivel Executar a Entrada, verifique manualmente ---'));
+    await page.waitForTimeout(500); // Garante que a mensagem seja exibida antes do prompt
+
+    const prosseguir = (await prompt('Deseja prosseguir para a próxima nota? (S/N)')).toUpperCase();
+    if (prosseguir === 'S' || prosseguir === 'SIM') {
+      console.log(color.warn('Prosseguindo para a próxima nota a pedido do usuário.'));
+      return { produtosXml: [], continuar: false, pulouPorExecutar: true };
+    } else {
+      console.log(color.err('Processamento encerrado pelo usuário.'));
+      throw new Error('Processamento encerrado pelo usuário após falha em "Executar Entrada".');
+    }
+  }
+  // --- FIM MELHORIA 2 ---
 
   await Promise.race([
     page.waitForSelector('input#Operacao', { state: 'attached' }),
@@ -316,13 +338,13 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
   ]).catch(() => { });
   await page.waitForTimeout(250);
 
-  // 3. Exibe as informações extraídas e DEPOIS pede a Operação
+  // 3. Exibe as informações extraídas
   console.log('\n' + color.section('======================================================================'));
   console.log(color.section('PASSO: Operação e CFOP (1ª aba) — Analise os dados abaixo:'));
   console.log(color.section('======================================================================'));
 
   console.log(color.info('\n-- Produtos na Nota --'));
-  descricoesProdutos.forEach((desc, i) => console.log(`${String(i+1).padStart(2, ' ')}: ${desc}`));
+  descricoesProdutos.forEach((desc, i) => console.log(`${String(i + 1).padStart(2, ' ')}: ${desc}`));
 
   console.log(color.info('\n-- Fornecedor --'));
   console.log(`↳ ${fornecedor}`);
@@ -330,6 +352,30 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
   console.log(color.info('\n-- Natureza da Operação --'));
   console.log(`↳ ${natOp}\n`);
 
+  // --- INÍCIO MELHORIA 3 (ANTIGA): CONFIRMAR ENTRADA Opcional (ENTER) ---
+  const confirmarStr = await prompt(color.ask('Deseja prosseguir com a ENTRADA desta nota (Enter para Sim / N para Não)?'));
+  const confirmar = confirmarStr.toUpperCase();
+  if (confirmar === 'N' || confirmar === 'NÃO') {
+    console.log(color.warn('Entrada cancelada a pedido do usuário.'));
+
+    // Clica em "Cancelar"
+    await page.getByRole('button', { name: /Cancelar/i }).click();
+    await page.waitForTimeout(300);
+
+    // Confirma o cancelamento no modal (clicar "Sim")
+    try {
+      await page.getByRole('button', { name: /Sim/i }).click({ timeout: 5000 });
+    } catch {
+      console.log(color.warn('[AVISO] Botão "Sim" para confirmar cancelamento não encontrado; ignorando.'));
+    }
+    await page.waitForLoadState('networkidle');
+    return { produtosXml: [], continuar: false, pulouPorExecutar: false };
+  }
+  console.log(color.ok('Prosseguindo com a entrada da nota...'));
+  // --- FIM MELHORIA 3 (ANTIGA) ---
+
+
+  // 4. Pede o CÓDIGO de Operação
   // -------- Operacao --------
   let operacaoInput = page.locator('input#Operacao').first();
   if (!(await operacaoInput.count())) operacaoInput = page.getByLabel(/Operaç[aã]o\s*\*/i).first();
@@ -339,7 +385,7 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
 
   if (await operacaoInput.count()) {
     await operacaoInput.waitFor({ timeout: 15000 });
-    const codigoOperacao = await prompt('Digite o CÓDIGO de Operação (#Operacao):'); // Pergunta é feita aqui
+    const codigoOperacao = await prompt('Digite o CÓDIGO de Operação (#Operacao) (Enter para manter valor atual):'); // Pergunta é feita aqui
     if (codigoOperacao?.trim()) {
       await operacaoInput.fill(codigoOperacao.trim());
       await operacaoInput.blur().catch(() => { });
@@ -347,7 +393,7 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
       await page.waitForTimeout(700);
       console.log(color.ok('✔ Código de Operação aplicado.'));
     } else {
-      console.log(color.info('[AVISO] Código de Operação vazio. Mantendo valor atual.'));
+      console.log(color.info('-> Código de Operação mantido.'));
     }
   } else {
     console.log(color.warn('[AVISO] Campo "#Operacao" não localizado.'));
@@ -378,13 +424,13 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
     if (opcoes.length) {
       console.log('\nOpções de CFOP (1ª aba):');
       opcoes.forEach((op, i) => console.log(`${i} → ${op.label} (value=${op.value})`));
-      const idxStr = await prompt('Escolha o ÍNDICE da CFOP (1ª aba):');
+      const idxStr = await prompt('Escolha o ÍNDICE da CFOP (1ª aba) (Enter para manter valor atual):');
       const idx = parseInt(idxStr, 10);
       if (Number.isFinite(idx) && idx >= 0 && idx < opcoes.length) {
         await cfopSelect.selectOption(opcoes[idx].value);
-        console.log(color.ok(`CFOP selecionada (1ª aba): ${opcoes[idx].label} (value=${opcoes[idx].value})`));
+        console.log(color.ok(`✔ CFOP selecionada (1ª aba): ${opcoes[idx].label} (value=${opcoes[idx].value})`));
       } else {
-        console.log(color.info('Índice inválido. Mantendo CFOP atual na 1ª aba.'));
+        console.log(color.info('-> CFOP mantida na 1ª aba.'));
       }
     } else {
       console.log(color.warn('[AVISO] Nenhuma opção de CFOP encontrada no select da 1ª aba.'));
@@ -398,6 +444,8 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
   console.log(color.section('----------------------------------------------------------------------\n'));
 
   await page.waitForTimeout(100);
+
+  return { produtosXml, continuar: true, pulouPorExecutar: false };
 }
 
 
@@ -440,12 +488,12 @@ async function irParaAbaDadosDoProdutos(page) {
  */
 
 // aliases locais (NÃO redeclaram as globais do projeto)
-const _CLR   = (globalThis.CLR   ?? { reset:'\x1b[0m', bold:'\x1b[1m', red:'\x1b[31m' });
-const _color = (globalThis.color ?? { section:(s)=>s, warn:(s)=>s });
+const _CLR = (globalThis.CLR ?? { reset: '\x1b[0m', bold: '\x1b[1m', red: '\x1b[31m' });
+const _color = (globalThis.color ?? { section: (s) => s, warn: (s) => s });
 
 // Larguras alvo e mínimas por coluna
-const _PREFW = { IDX:3, DESC:44, CUSTO:10, QTDE:6, TOTAL:14, FATOR:6, COD:10, DESCVINC:32, CFOP:6 };
-const _MINW  = { IDX:3, DESC:22, CUSTO:7,  QTDE:4, TOTAL:10, FATOR:4, COD:6,  DESCVINC:16, CFOP:3  };
+const _PREFW = { IDX: 3, DESC: 44, CUSTO: 10, QTDE: 6, TOTAL: 14, FATOR: 6, COD: 10, DESCVINC: 32, CFOP: 6 };
+const _MINW = { IDX: 3, DESC: 22, CUSTO: 7, QTDE: 4, TOTAL: 10, FATOR: 4, COD: 6, DESCVINC: 16, CFOP: 3 };
 
 // separador entre colunas
 const _SEP = ' | ';
@@ -477,14 +525,14 @@ function _normLabel(s) {
     .trim()
     .toLowerCase();
 }
-function _isDesc(lbl){ const n=_normLabel(lbl); return n.includes('descr') && !n.includes('vinc'); }
-function _isCusto(lbl){ return _normLabel(lbl).includes('custo'); }
-function _isQtde(lbl){ const n=_normLabel(lbl); return n.includes('qtde') || n.includes('quant'); }
-function _isTotal(lbl){ return _normLabel(lbl).includes('total'); }
-function _isFator(lbl){ return _normLabel(lbl).includes('fator'); }
-function _isCodVinc(lbl){ const n=_normLabel(lbl); return n.includes('cod') && n.includes('vinc'); }
-function _isDescrVinc(lbl){ const n=_normLabel(lbl); return n.includes('descr') && n.includes('vinc'); }
-function _isCFOP(lbl){ return _normLabel(lbl).includes('cfop'); }
+function _isDesc(lbl) { const n = _normLabel(lbl); return n.includes('descr') && !n.includes('vinc'); }
+function _isCusto(lbl) { return _normLabel(lbl).includes('custo'); }
+function _isQtde(lbl) { const n = _normLabel(lbl); return n.includes('qtde') || n.includes('quant'); }
+function _isTotal(lbl) { return _normLabel(lbl).includes('total'); }
+function _isFator(lbl) { return _normLabel(lbl).includes('fator'); }
+function _isCodVinc(lbl) { const n = _normLabel(lbl); return n.includes('cod') && n.includes('vinc'); }
+function _isDescrVinc(lbl) { const n = _normLabel(lbl); return n.includes('descr') && n.includes('vinc'); }
+function _isCFOP(lbl) { return _normLabel(lbl).includes('cfop'); }
 
 /* ------------------- largura do terminal e linhas cheias ------------------- */
 function _termCols() {
@@ -493,7 +541,7 @@ function _termCols() {
     : 120;
   return Math.max(40, c); // nunca menos que 40
 }
-function _makeLine(ch='=', margin=1) {
+function _makeLine(ch = '=', margin = 1) {
   // mesma largura para "=" e "-" — margin=1 evita quebra por última coluna
   const w = _termCols() - margin;
   return ch.repeat(w);
@@ -524,13 +572,13 @@ function _recalcWidths() {
     if (sobra > 0) sobra -= reduce('DESC', Math.ceil(sobra * 0.6));
     if (sobra > 0) sobra -= reduce('DESCVINC', Math.ceil(sobra * 0.4));
 
-    const ordem = ['TOTAL','CUSTO','COD','FATOR','QTDE','CFOP'];
+    const ordem = ['TOTAL', 'CUSTO', 'COD', 'FATOR', 'QTDE', 'CFOP'];
     for (const k of ordem) {
       if (sobra <= 0) break;
       sobra -= reduce(k, Math.min(2, sobra));
     }
     if (sobra > 0) {
-      const all = ['DESC','DESCVINC','TOTAL','CUSTO','COD','FATOR','QTDE','CFOP'];
+      const all = ['DESC', 'DESCVINC', 'TOTAL', 'CUSTO', 'COD', 'FATOR', 'QTDE', 'CFOP'];
       for (const k of all) {
         if (sobra <= 0) break;
         sobra -= reduce(k, 1);
@@ -581,13 +629,13 @@ async function coletarProdutosDaTabela(page) {
     };
     const item = {
       descricao: await read(idx.descricao),
-      custo:     await read(idx.custo),
-      qtde:      await read(idx.qtde),
-      total:     await read(idx.total),
-      fator:     await read(idx.fator),
-      codVinc:   await read(idx.codVinc),
+      custo: await read(idx.custo),
+      qtde: await read(idx.qtde),
+      total: await read(idx.total),
+      fator: await read(idx.fator),
+      codVinc: await read(idx.codVinc),
       descrVinc: await read(idx.descrVinc),
-      cfop:      await read(idx.cfop),
+      cfop: await read(idx.cfop),
       _row: r
     };
     const temAlgo = Object.values(item).some(v => (typeof v === 'string' ? v.trim() !== '' : false));
@@ -606,15 +654,15 @@ async function coletarProdutosDaTabela(page) {
 function _buildHeader() {
   _recalcWidths();
   const parts = [
-    _padVal('idx',       _W.IDX),
+    _padVal('idx', _W.IDX),
     _padVal('Descrição', _W.DESC),
-    _padVal('Custo',     _W.CUSTO),
-    _padVal('Qtde',      _W.QTDE),
-    _padVal('Total',     _W.TOTAL),
-    _padVal('Fator',     _W.FATOR),
-    _padVal('Cód.Vinc',  _W.COD),
-    _padVal('Descr.Vinc',_W.DESCVINC),
-    _padVal('CFOP',      _W.CFOP),
+    _padVal('Custo', _W.CUSTO),
+    _padVal('Qtde', _W.QTDE),
+    _padVal('Total', _W.TOTAL),
+    _padVal('Fator', _W.FATOR),
+    _padVal('Cód.Vinc', _W.COD),
+    _padVal('Descr.Vinc', _W.DESCVINC),
+    _padVal('CFOP', _W.CFOP),
   ];
   return parts.join(_SEP);
 }
@@ -631,7 +679,7 @@ function printTabelaProdutos(produtos) {
   const headerStr = _buildHeader();
 
   // Agora as duas linhas usam a MESMA largura do terminal
-  const LINE_EQ   = _makeLine('=');
+  const LINE_EQ = _makeLine('=');
   const LINE_DASH = _makeLine('-');
 
   console.log(LINE_EQ);
@@ -640,15 +688,15 @@ function printTabelaProdutos(produtos) {
 
   produtos.forEach((p, i) => {
     let linha = [
-      _padLeft(i,           _W.IDX),
-      _padVal(p.descricao,  _W.DESC),
-      _padVal(p.custo,      _W.CUSTO),
-      _padVal(p.qtde,       _W.QTDE),
-      _padVal(p.total,      _W.TOTAL),
-      _padVal(p.fator,      _W.FATOR),
-      _padVal(p.codVinc,    _W.COD),
-      _padVal(p.descrVinc,  _W.DESCVINC),
-      _padVal(p.cfop,       _W.CFOP),
+      _padLeft(i, _W.IDX),
+      _padVal(p.descricao, _W.DESC),
+      _padVal(p.custo, _W.CUSTO),
+      _padVal(p.qtde, _W.QTDE),
+      _padVal(p.total, _W.TOTAL),
+      _padVal(p.fator, _W.FATOR),
+      _padVal(p.codVinc, _W.COD),
+      _padVal(p.descrVinc, _W.DESCVINC),
+      _padVal(p.cfop, _W.CFOP),
     ].join(_SEP);
 
     linha = _colorizeVazio(linha);
@@ -693,15 +741,15 @@ async function perguntarIndicesParaEditar(produtos, linhasCruas) {
 
 /**
  * ===============================================================
- *  BLOCO 6 — EDITAR PRODUTOS SELECIONADOS (Codigo → Fator → CFOP)
- *  Ajustes: perguntas inline (cursor na mesma linha) com ask()
- *           + fator “modo calculadora” (unidade ou kg) com TAB.
+ * BLOCO 6 — EDITAR PRODUTOS SELECIONADOS (Codigo → Fator → CFOP)
+ * Ajustes: perguntas inline (cursor na mesma linha) com ask()
+ * + fator “modo calculadora” (unidade ou kg) com TAB.
  * ===============================================================
  */
-async function editarProdutosSelecionados(page, produtos, selecao) {
+async function editarProdutosSelecionados(page, produtos, selecao, produtosXml) {
   // ---- Helper de pergunta inline (cursor na mesma linha) ----
   const tintAsk = (s) => (typeof color?.ask === 'function' ? color.ask(s)
-                    : (typeof color?.info === 'function' ? color.info(s) : s));
+    : (typeof color?.info === 'function' ? color.info(s) : s));
   async function ask(msg) {
     // imprime a mensagem colorida direto no prompt para ficar inline
     const resp = await prompt(tintAsk(String(msg)) + ' ');
@@ -712,7 +760,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
     if (!item?._row) throw new Error('Linha do produto (_row) não encontrada para abrir o modal.');
     const row = item._row;
     await row.waitFor({ timeout: 15000 });
-    await row.scrollIntoViewIfNeeded().catch(() => {});
+    await row.scrollIntoViewIfNeeded().catch(() => { });
     try { await row.dblclick(); }
     catch {
       const firstCell = row.locator('td').first();
@@ -741,15 +789,15 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
 
   // ---------- Helpers de input mascarado ----------
   async function limparCampoMascarado(inp, page) {
-    try { await inp.click({ force: true }); } catch {}
-    try { await inp.focus(); } catch {}
-    try { await page.keyboard.press('Control+A'); } catch {}
+    try { await inp.click({ force: true }); } catch { }
+    try { await inp.focus(); } catch { }
+    try { await page.keyboard.press('Control+A'); } catch { }
     for (let i = 0; i < 8; i++) {
-      try { await page.keyboard.press('Backspace'); } catch {}
+      try { await page.keyboard.press('Backspace'); } catch { }
       await page.waitForTimeout(20);
     }
     for (let i = 0; i < 2; i++) {
-      try { await page.keyboard.press('Delete'); } catch {}
+      try { await page.keyboard.press('Delete'); } catch { }
       await page.waitForTimeout(10);
     }
     await page.waitForTimeout(80);
@@ -798,7 +846,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
   async function tentarModoDecimal(inp, page, digs) {
     await limparCampoMascarado(inp, page);
     await digitarDigitos(inp, page, digs);      // sem vírgula — máscara desloca
-    try { await page.keyboard.press('Tab'); } catch {}
+    try { await page.keyboard.press('Tab'); } catch { }
     await page.waitForTimeout(160);
     const exibido = await lerValorSeguro(inp);
     const esperado = digitosParaDecimal3(digs);
@@ -808,7 +856,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
   async function tentarModoInteiro(inp, page, digs) {
     await limparCampoMascarado(inp, page);
     await digitarDigitos(inp, page, digs);      // inteiro, sem vírgula
-    try { await page.keyboard.press('Tab'); } catch {}
+    try { await page.keyboard.press('Tab'); } catch { }
     await page.waitForTimeout(160);
     const exibido = await lerValorSeguro(inp);
     const esperadoTrim = digs.replace(/^0+(?=\d)/, '');
@@ -869,19 +917,66 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
 
     if (await inpCodigo.count()) {
       const atual = await lerValorSeguro(inpCodigo);
-      const novo = await ask(`Codigo atual: ${atual || '[VAZIO]'} — Digite novo Codigo (Enter para manter):`);
-      if (novo) {
+
+      // Exibir novas opções
+      console.log(color.info('\nOpções para o campo "Codigo":'));
+      console.log(color.info("  ↳ Digite '0' para PESQUISAR um produto existente."));
+      console.log(color.info("  ↳ Digite 'D' para DUPLICAR um produto similar (F8)."));
+      console.log(color.info("  ↳ Digite um novo código para cadastrá-lo."));
+      console.log(color.info("  ↳ Pressione Enter para manter o código atual."));
+
+      const novo = await ask(`\nCodigo atual: ${atual || '[VAZIO]'} — Escolha uma opção:`);
+
+      if (novo === '0') {
+        // Opção 1: Pesquisar produto (digitar 0 e Enter)
+        await inpCodigo.fill('0');
+        try { await inpCodigo.focus(); } catch { }
+        try { await inpCodigo.press('Enter'); } catch { await page.keyboard.press('Enter').catch(() => { }); }
+        console.log(color.warn('\n--- Escolha manualmente um produto já cadastrado. ---'));
+        await pause('Após selecionar, pressione Enter aqui para continuar...');
+
+      } else if (novo.toUpperCase() === 'D') {
+        // Opção 2: Duplicar (F8) e exibir dados do XML
+        try { await inpCodigo.focus(); } catch { }
+        await page.keyboard.press('F8');
+        console.log(color.info('\nMantendo o foco no terminal. Buscando dados do XML para auxiliar o cadastro...'));
+
+        // Encontrar o produto correspondente no XML pela descrição
+        const produtoXmlCorrespondente = (produtosXml || []).find(p => p.prod?.xProd === item.descricao);
+
+        if (produtoXmlCorrespondente) {
+          const desc = produtoXmlCorrespondente.prod?.xProd || 'N/A';
+          // >>>>>>>> LINHA CORRIGIDA ABAIXO <<<<<<<<<<
+          const gtin = String(produtoXmlCorrespondente.prod?.cEAN || '');
+          console.log(`\nDescrição: ${desc}`);
+          if (gtin && gtin.trim() !== '' && gtin.trim() !== 'SEM GTIN') {
+            console.log(`GTIN/EAN:  ${gtin}`);
+          } else {
+            console.log(color.err('--- PRODUTO SEM GTIN ---'));
+          }
+        } else {
+          console.log(color.warn(`[AVISO] Não foi possível encontrar o produto "${item.descricao}" no XML para extrair dados.`));
+        }
+
+        console.log(color.warn('\n--- Cadastre manualmente um produto buscando um similar. ---'));
+        await pause('Após cadastrar, pressione Enter aqui para continuar...');
+
+      } else if (novo) {
+        // Comportamento original: digitar novo código
         await inpCodigo.fill(novo);
-        try { await inpCodigo.focus(); } catch {}
-        try { await inpCodigo.press('Enter'); } catch { await page.keyboard.press('Enter').catch(() => {}); }
+        try { await inpCodigo.focus(); } catch { }
+        try { await inpCodigo.press('Enter'); } catch { await page.keyboard.press('Enter').catch(() => { }); }
         await page.waitForTimeout(150);
         console.log(color.ok(`✔ Codigo atualizado e confirmado (Enter): ${novo}`));
+
       } else {
+        // Comportamento original: manter
         console.log(color.info('-> Codigo mantido.'));
       }
     } else {
       console.log(color.warn('[!] Campo "Codigo" não localizado neste modal.'));
     }
+
 
     // === 2) FATOR — Unidade (inteiro) ou Kg (decimal com vírgula) =========
     let inpFator = modal.getByRole('textbox', { name: /Fator/i }).first();
@@ -950,7 +1045,7 @@ async function editarProdutosSelecionados(page, produtos, selecao) {
     if (!(await btnConfirmar.count())) btnConfirmar = modal.getByRole('button', { name: /Salvar/i }).first();
 
     if (await btnConfirmar.count()) {
-      await btnConfirmar.click().catch(() => {});
+      await btnConfirmar.click().catch(() => { });
       await waitModalFechar(page);
       console.log(color.ok('✔ Modal confirmado e fechado.'));
     } else {
@@ -1043,13 +1138,25 @@ async function executarEntradaFinal(page) {
 async function processarNota(page, chave, xmlContent) {
   try {
     console.log(color.section(`\n==============================\nProcessando CHAVE: ${chave}\n==============================`));
-    // Esta função agora é chamada com o XML já encontrado, então a lógica interna não muda.
-    await iniciarEntradaComDadosXML(page, chave, xmlContent);
+
+    const { produtosXml, continuar, pulouPorExecutar } = await iniciarEntradaComDadosXML(page, chave, xmlContent);
+
+    if (pulouPorExecutar) {
+      // Se a automação pulou a nota porque não conseguiu Executar Entrada (Melhoria 2)
+      return { sucesso: false, pulou: true, erro: 'Pulada por erro em "Executar Entrada".' };
+    }
+
+    if (!continuar) {
+      // Se a automação pulou a nota porque o usuário cancelou (Melhoria 3)
+      console.log(color.warn(`[PULAR] Chave ${chave} foi cancelada pelo usuário.`));
+      return { sucesso: false, pulou: true, erro: 'Cancelado pelo usuário.' };
+    }
+
     await irParaAbaDadosDoProdutos(page);
 
     const { produtos, linhasCruas } = await coletarProdutosDaTabela(page);
     const selecao = await perguntarIndicesParaEditar(produtos, linhasCruas);
-    await editarProdutosSelecionados(page, produtos, selecao);
+    await editarProdutosSelecionados(page, produtos, selecao, produtosXml);
     await executarEntradaFinal(page);
 
     console.log('\n' + color.ok(`[OK] Chave ${chave} finalizada com sucesso.`));
@@ -1132,17 +1239,110 @@ async function processarNota(page, chave, xmlContent) {
   // ----- FASE 2: IDENTIFICAR TAREFAS NA TABELA FILTRADA -----
   const chavesParaProcessar = [];
   try {
-    console.log(color.info('\nFiltrando a tabela para encontrar notas pendentes...'));
+    console.log(color.info('\nConfigurando filtro de notas pendentes...'));
     await page.getByRole('button', { name: 'Dados de Pesquisa' }).click();
+    await page.waitForTimeout(500); // Aguarda o painel abrir
+
+    // --- PERGUNTAR DATAS (ANTIGA MELHORIA 1: ENTER MANTÉM PADRÃO) ---
+    console.log(color.section('\n======================================================================'));
+    console.log(color.section('FILTRO: Período de Emissão (Enter para manter valor padrão)'));
+    console.log(color.section('======================================================================'));
+
+    const dataInicialStr = await prompt('Digite a DATA INICIAL (formato DD/MM/AAAA):');
+    const dataFinalStr = await prompt('Digite a DATA FINAL (formato DD/MM/AAAA):');
+
+    const parseAndNormalizeDate = (dateStr) => {
+      // Tenta DD/MM/AAAA
+      const match = dateStr.match(/^(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})$/);
+      if (match) {
+        const [_, d, m, y] = match;
+        // Converte para AAAA-MM-DD para preenchimento
+        return { fill: `${y.padStart(4, '20')}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`, type: `${d.padStart(2, '0')}${m.padStart(2, '0')}${y.padStart(4, '20')}` };
+      }
+      throw new Error('Formato de data inválido. Use DD/MM/AAAA.');
+    };
+
+    // Localiza os campos de input de data
+    let inpDataIni = page.locator('ia-input-list').filter({ hasText: 'Inicial' }).locator('#DataEmissao').first();
+    if (!(await inpDataIni.count())) inpDataIni = page.locator('input#DataEmissao').first();
+    
+    let inpDataFim = page.locator('ia-input-list').filter({ hasText: 'Final' }).locator('#DataEmissao2').first();
+    if (!(await inpDataFim.count())) inpDataFim = page.locator('input#DataEmissao2').first();
+    
+    // Processa Data Inicial (campo #DataEmissao)
+    if (inpDataIni.count() && dataInicialStr.trim()) {
+      try {
+        const dataInicial = parseAndNormalizeDate(dataInicialStr);
+        await inpDataIni.focus();
+        await inpDataIni.click();
+        // Digitação manual (caractere por caractere) para contornar máscaras
+        await inpDataIni.press('Control+A');
+        await inpDataIni.press('Delete');
+        await page.keyboard.type(dataInicial.type, { delay: 50 });
+        await inpDataIni.blur().catch(() => { });
+        await page.waitForTimeout(300);
+        console.log(color.ok(`✔ Data Inicial (Emissão) definida: ${dataInicialStr}`));
+      } catch (e) {
+        console.log(color.err(`[ERRO] ${e.message}`));
+        console.log(color.warn('-> Mantendo Data Inicial (Emissão) padrão.'));
+      }
+    } else if (inpDataIni.count()) {
+      console.log(color.info('-> Data Inicial (Emissão) mantida com valor padrão.'));
+    } else {
+      console.log(color.warn('[AVISO] Campo Data Inicial (Emissão) não localizado.'));
+    }
+
+    // Processa Data Final (campo #DataEmissao2)
+    if (inpDataFim.count() && dataFinalStr.trim()) {
+      try {
+        const dataFinal = parseAndNormalizeDate(dataFinalStr);
+        await inpDataFim.focus();
+        await inpDataFim.click();
+        // Digitação manual (caractere por caractere) para contornar máscaras
+        await inpDataFim.press('Control+A');
+        await inpDataFim.press('Delete');
+        await page.keyboard.type(dataFinal.type, { delay: 50 });
+        await inpDataFim.blur().catch(() => { });
+        await page.waitForTimeout(300);
+        console.log(color.ok(`✔ Data Final (Emissão) definida: ${dataFinalStr}`));
+      } catch (e) {
+        console.log(color.err(`[ERRO] ${e.message}`));
+        console.log(color.warn('-> Mantendo Data Final (Emissão) padrão.'));
+      }
+    } else if (inpDataFim.count()) {
+      console.log(color.info('-> Data Final (Emissão) mantida com valor padrão.'));
+    } else {
+      console.log(color.warn('[AVISO] Campo Data Final (Emissão) não localizado.'));
+    }
+    
+    console.log(color.section('----------------------------------------------------------------------\n'));
+    // --- FIM PERGUNTAR DATAS ---
+
+    // Filtro de Entrada = Não (N)
     await page.locator('select[name="Entrada"]').selectOption('N');
+
     await page.getByRole('button', { name: /Pesquisar/i }).click();
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500); // Stabilidade
 
+    // --- INÍCIO MELHORIA 1: ORDENAR PELA COLUNA "XML" ---
+    console.log(color.info('Ordenando a tabela para priorizar notas com XML "Sim"...'));
+    try {
+        const headerXML = page.locator('table thead th').filter({ hasText: /XML/i }).first();
+        await headerXML.waitFor({ timeout: 10000 });
+        // Clica duas vezes para ordenar em ordem decrescente (Sim > Não)
+        await headerXML.dblclick();
+        await page.waitForTimeout(2000); // Pausa para a UI/servidor aplicar a ordenação
+        console.log(color.ok('✔ Tabela ordenada por "XML".'));
+    } catch (e) {
+        console.log(color.warn(`[AVISO] Não foi possível ordenar a tabela pela coluna "XML". Prosseguindo sem ordenação. Erro: ${e.message}`));
+    }
+    // --- FIM MELHORIA 1 ---
+
     console.log(color.info('Analisando a tabela de resultados...'));
     const table = page.locator('table').first();
     const headers = (await table.locator('thead th').allTextContents()).map(h => h.trim().toLowerCase());
-    
+
     const chaveIndex = headers.findIndex(h => h.includes('chave'));
     const xmlIndex = headers.findIndex(h => h.includes('xml'));
     const entradaIndex = headers.findIndex(h => h.includes('entrada'));
@@ -1171,7 +1371,7 @@ async function processarNota(page, chave, xmlContent) {
     await browser.close();
     return;
   }
-  
+
   // ----- FASE 3: EXECUÇÃO DO PROCESSAMENTO -----
   if (chavesParaProcessar.length === 0) {
     console.log(color.warn('\nNenhuma nota com XML="Sim" e Entrada="Não" foi encontrada para processar.'));
@@ -1186,7 +1386,7 @@ async function processarNota(page, chave, xmlContent) {
     }
     // Sempre garante que estamos na tela certa antes de processar
     await irParaImportacao(page);
-    
+
     const xmlContent = xmlDataMap.get(chave);
     const r = await processarNota(page, chave, xmlContent);
     resultados.push({ chave, ...r });
@@ -1200,11 +1400,25 @@ async function processarNota(page, chave, xmlContent) {
 
   console.log('\n' + color.section('================ RESUMO FINAL ================'));
   const ok = resultados.filter(x => x.sucesso);
-  const fail = resultados.filter(x => !x.sucesso);
+  const fail = resultados.filter(x => !x.sucesso && !x.pulou);
+  const skipped = resultados.filter(x => x.pulou);
+
   console.log(color.ok(`Sucesso: ${ok.length}`));
   ok.forEach(x => console.log(color.ok(`  - ${x.chave}`)));
+
+  if (skipped.length > 0) {
+    console.log(color.warn(`\nCanceladas/Puladas: ${skipped.length}`));
+    skipped.forEach(x => {
+      let motivo = '';
+      if (x.erro.includes('Executar Entrada')) motivo = '(Executar Entrada)';
+      else if (x.erro.includes('Cancelado pelo usuário')) motivo = '(Usuário)';
+      else motivo = '(Outro motivo)';
+      console.log(color.warn(`  - ${x.chave} ${motivo}`));
+    });
+  }
+
   if (fail.length > 0) {
-    console.log(color.err(`\nFalhas: ${fail.length}`));
+    console.log(color.err(`\nFalhas (Robô/Sistema): ${fail.length}`));
     fail.forEach(x => console.log(color.err(`  - ${x.chave} :: ${x.erro}`)));
   }
   console.log(color.section('=============================================='));
