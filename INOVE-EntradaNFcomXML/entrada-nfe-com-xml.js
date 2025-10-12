@@ -298,29 +298,52 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
   const descricoesProdutos = produtosXml.map(p => p.prod?.xProd || 'Descrição não encontrada');
 
   // 2. Pesquisa a chave no sistema para iniciar a entrada
-  // --> CORREÇÃO: Garante que o painel de pesquisa esteja aberto e aguarda a UI
   try {
     await clickByText(page, /Dados de Pesquisa/i, { timeout: 5000 });
-    await page.waitForTimeout(500); // Pequena pausa para a UI reagir
+    await page.waitForTimeout(500);
   } catch (_) { }
 
   await page.getByRole('textbox', { name: /Chave/i }).fill(chave);
   await clickByText(page, /Pesquisar/i);
-  await page.waitForLoadState('networkidle');
+
+  // --- OTIMIZAÇÃO 1: ESPERA FOCADA ---
+  // Trocamos 'networkidle' por uma espera pelo resultado visual da pesquisa (a tabela).
+  // Isso é mais rápido e confiável do que esperar a rede.
+  await page.waitForSelector('table tbody tr', { timeout: 20000 });
 
   const row = page.locator('table tbody tr').filter({
     has: page.locator('td', { hasText: chave })
   }).first();
-  await row.waitFor({ timeout: 15000 });
+
+  // --- OTIMIZAÇÃO 2: TIMEOUT REDUZIDO ---
+  // A espera anterior já garantiu que a tabela carregou.
+  // Reduzimos este timeout para garantir que a linha específica está pronta, o que deve ser rápido.
+  await row.waitFor({ timeout: 5000 }); // Reduzido de 15000ms para 5000ms
   await row.click();
-  
-  // --- INÍCIO MELHORIA 2: TRATAMENTO DE BOTÃO "Executar Entrada" (Timeout 3000ms) ---
+
+  // --- INÍCIO MELHORIA 2 (VERSÃO CORRIGIDA): VERIFICAÇÃO DE ESTADO ANTES DO CLIQUE ---
   try {
-    // Reduzido o timeout de 15000ms para 3000ms
-    await clickByText(page, /Executar Entrada/i, { timeout: 3000 });
-    await page.waitForLoadState('networkidle');
+    const executarBtn = page.getByRole('button', { name: /Executar Entrada/i });
+
+    // 1. Espera o botão existir no DOM por no máximo 1 segundo.
+    await executarBtn.waitFor({ timeout: 1000 });
+
+    // 2. Verifica se o botão está HABILITADO com um timeout super curto (100ms).
+    //    Se não estiver habilitado nesse tempo, ele não vai ficar.
+    const isEnabled = await executarBtn.isEnabled({ timeout: 100 });
+
+    if (isEnabled) {
+      // 3. Se estiver habilitado, clica e prossegue.
+      await executarBtn.click();
+      await page.waitForLoadState('networkidle');
+    } else {
+      // 4. Se o botão existe mas está desabilitado, forçamos um erro para cair no 'catch' imediatamente.
+      //    Isso evita a espera de 30 segundos do Playwright.
+      throw new Error("Botão 'Executar Entrada' está presente, mas desabilitado.");
+    }
+
   } catch (err) {
-    // Se o botão não for encontrado após 3s (timeout), exibe a mensagem de aviso e pausa.
+    // Agora, este bloco será acionado quase que instantaneamente se o botão não existir ou estiver desabilitado.
     console.log(color.warn('\n--- Não foi possivel Executar a Entrada, verifique manualmente ---'));
     await page.waitForTimeout(500); // Garante que a mensagem seja exibida antes do prompt
 
@@ -330,6 +353,7 @@ async function iniciarEntradaComDadosXML(page, chave, xmlContent) {
       return { produtosXml: [], continuar: false, pulouPorExecutar: true };
     } else {
       console.log(color.err('Processamento encerrado pelo usuário.'));
+      // Lança um erro mais descritivo para o log final
       throw new Error('Processamento encerrado pelo usuário após falha em "Executar Entrada".');
     }
   }
@@ -1178,7 +1202,7 @@ async function processarNota(page, chave, xmlContent) {
 
 /**
  * ===============================================================
- * BLOCO 9 — ROTINA PRINCIPAL (MAIN) - CORREÇÃO FINAL DA REGEX
+ * BLOCO 9 — ROTINA PRINCIPAL (MAIN) - CORREÇÃO FINAL E FECHAMENTO DE ABA
  * ===============================================================
  */
 (async () => {
@@ -1266,10 +1290,10 @@ async function processarNota(page, chave, xmlContent) {
 
     let inpDataIni = page.locator('ia-input-list').filter({ hasText: 'Inicial' }).locator('#DataEmissao').first();
     if (!(await inpDataIni.count())) inpDataIni = page.locator('input#DataEmissao').first();
-    
+
     let inpDataFim = page.locator('ia-input-list').filter({ hasText: 'Final' }).locator('#DataEmissao2').first();
     if (!(await inpDataFim.count())) inpDataFim = page.locator('input#DataEmissao2').first();
-    
+
     if (inpDataIni.count() && dataInicialStr.trim()) {
       try {
         const dataInicial = parseAndNormalizeDate(dataInicialStr);
@@ -1311,7 +1335,7 @@ async function processarNota(page, chave, xmlContent) {
     } else {
       console.log(color.warn('[AVISO] Campo Data Final (Emissão) não localizado.'));
     }
-    
+
     console.log(color.section('----------------------------------------------------------------------\n'));
 
     // Filtro de Entrada = Não (N)
@@ -1322,63 +1346,73 @@ async function processarNota(page, chave, xmlContent) {
 
     console.log(color.info('Interceptando o download do relatório PDF via rede...'));
     const pdfPromise = new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
+      const timeoutId = setTimeout(() => {
+        page.off('response', responseListener);
+        reject(new Error('Timeout: O PDF do relatório não foi recebido da rede em 30 segundos.'));
+      }, 30000);
+      const responseListener = async (response) => {
+        const contentType = response.headers()['content-type'] || '';
+        if (contentType.includes('application/pdf')) {
+          console.log(color.ok(`✔ Resposta com PDF interceptada da URL: ${response.url()}`));
+          try {
+            const buffer = await response.body();
+            clearTimeout(timeoutId);
             page.off('response', responseListener);
-            reject(new Error('Timeout: O PDF do relatório não foi recebido da rede em 30 segundos.'));
-        }, 30000);
-        const responseListener = async (response) => {
-            const contentType = response.headers()['content-type'] || '';
-            if (contentType.includes('application/pdf')) {
-                console.log(color.ok(`✔ Resposta com PDF interceptada da URL: ${response.url()}`));
-                try {
-                    const buffer = await response.body();
-                    clearTimeout(timeoutId);
-                    page.off('response', responseListener);
-                    resolve(buffer);
-                } catch (err) {
-                    clearTimeout(timeoutId);
-                    page.off('response', responseListener);
-                    reject(err);
-                }
-            }
-        };
-        page.on('response', responseListener);
+            resolve(buffer);
+          } catch (err) {
+            clearTimeout(timeoutId);
+            page.off('response', responseListener);
+            reject(err);
+          }
+        }
+      };
+      page.on('response', responseListener);
     });
+
+    // <<< NOVA LINHA >>> Prepara para capturar a nova aba que será aberta
+    const newPagePromise = context.waitForEvent('page');
+
+    // Clica no botão que dispara a geração do PDF e a abertura da nova aba
     await page.getByRole('button', { name: /Relatório/i }).click();
-    const pdfBuffer = await pdfPromise;
+
+    // Aguarda tanto o PDF ser baixado pela rede quanto a nova aba ser criada
+    const [pdfBuffer, newPage] = await Promise.all([
+      pdfPromise,
+      newPagePromise
+    ]);
+
     console.log(color.ok('✔ Relatório PDF capturado com sucesso da rede.'));
+
+    // <<< NOVA LINHA >>> Fecha a aba recém-criada do relatório
+    await newPage.close();
+    console.log(color.ok('✔ Aba do relatório PDF fechada. Foco retornado à aplicação.'));
 
     console.log(color.info('Analisando texto extraído do PDF...'));
     const data = await pdfParser(pdfBuffer);
     const pdfText = data.text;
 
     // ======================== LÓGICA DE MAPEAMENTO POR ORDEM ========================
-    // <<< LINHA CORRIGIDA ABAIXO >>>
-    const chavesRegex = /\d{44}/g; // 'g' para encontrar TODAS as sequências de 44 dígitos
-    const statusRegex = /(SimNão|SimSim|NãoNão|NãoSim)/g; // Encontra todos os pares de status
+    const chavesRegex = /\d{44}/g;
+    const statusRegex = /(SimNão|SimSim|NãoNão|NãoSim)/g;
 
     const chavesEncontradas = pdfText.match(chavesRegex) || [];
     const statusEncontrados = pdfText.match(statusRegex) || [];
 
     if (chavesEncontradas.length !== statusEncontrados.length) {
-        console.log(color.warn(`[AVISO] O número de chaves (${chavesEncontradas.length}) não corresponde ao número de status (${statusEncontrados.length}). A análise pode ser imprecisa.`));
+      console.log(color.warn(`[AVISO] O número de chaves (${chavesEncontradas.length}) não corresponde ao número de status (${statusEncontrados.length}). A análise pode ser imprecisa.`));
     }
 
-    // Usa o menor dos dois comprimentos para evitar erros de índice
     const loopLimit = Math.min(chavesEncontradas.length, statusEncontrados.length);
-
     for (let i = 0; i < loopLimit; i++) {
-        const chave = chavesEncontradas[i];
-        const statusPar = statusEncontrados[i];
-
-        // A condição que queremos é XML="Sim" e Entrada="Não"
-        if (statusPar === 'SimNão') {
-            if (xmlDataMap.has(chave)) {
-                chavesParaProcessar.push(chave);
-            } else {
-                console.log(color.warn(` -> Chave ${chave} (status 'SimNão') não possui XML local. Será ignorada.`));
-            }
+      const chave = chavesEncontradas[i];
+      const statusPar = statusEncontrados[i];
+      if (statusPar === 'SimNão') {
+        if (xmlDataMap.has(chave)) {
+          chavesParaProcessar.push(chave);
+        } else {
+          console.log(color.warn(` -> Chave ${chave} (status 'SimNão') não possui XML local. Será ignorada.`));
         }
+      }
     }
     // ==============================================================================
 
