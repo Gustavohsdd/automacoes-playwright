@@ -1,0 +1,26 @@
+{
+  "name": "relatorio-inove-sheets",
+  "version": "1.0.0",
+  "description": "Automação para baixar relatórios do ERP Inove e subir para o Google Sheets.",
+  "main": "RelatorioEntradaSaida.js",
+  "type": "module",
+  "scripts": {
+    "start": "node RelatorioEntradaSaida.js"
+  },
+  "keywords": [
+    "playwright",
+    "automation",
+    "google-sheets"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5",
+    "google-auth-library": "^9.11.0",
+    "google-spreadsheet": "^4.1.2",
+    "playwright-chromium": "^1.45.3",
+    "xlsx": "^0.18.5"
+  }
+}
