@@ -83,21 +83,21 @@ const SELECTORS = {
  * =================================================================================
  */
 const MAPEAMENTO_COLUNAS_CSV = {
-    // Colunas do CSV 'relatorio_produtos.csv'
+    // Colunas do 'Planilha Produto.xlsx - Produtos.csv'
     PRODUTOS: {
-        CODIGO: 'Codigo',
-        FAMILIA: 'Familia',
-        DEPARTAMENTO: 'Departamento'
+        CODIGO: 'Código',       // Corrigido de 'Codigo' 
+        FAMILIA: 'Família',     // Corrigido de 'Familia' 
+        DEPARTAMENTO: 'Departamento' // Já estava correto 
     },
-    // Colunas do CSV 'relatorio_entrada.csv'
+    // Colunas do 'Relatório de Entrada.xlsx - Relatório.csv'
     ENTRADA: {
-        DATA: 'Data Entrada',
-        CODIGO: 'Codigo',
-        DESCRICAO: 'Descricao',
-        QNTD: 'Quantidade',
-        PRECO_UN: 'Valor Unitario',
-        DESC: 'Desconto',
-        TOTAL: 'Valor Total'
+        // 'DATA' não é uma coluna no CSV, ela será extraída do cabeçalho da nota
+        CODIGO: 'Código',       // Corrigido de 'Codigo' [cite: 7598]
+        DESCRICAO: 'Descrição',   // Corrigido de 'Descricao' [cite: 7598]
+        QNTD: 'Qntd.',          // Corrigido de 'Quantidade' [cite: 7598]
+        PRECO_UN: 'Preço Unít.', // Corrigido de 'Valor Unitario' [cite: 7598]
+        DESC: 'Desc.',          // Corrigido de 'Desconto' [cite: 7598]
+        TOTAL: 'Total'          // Corrigido de 'Valor Total' [cite: 7598]
     }
 };
 
@@ -212,6 +212,31 @@ async function parseXLSX(filePath) {
     }
 }
 
+/**
+ * Lê e parseia um arquivo XLSX (Excel) de Entrada, retornando um array de arrays (linhas).
+ * Esta função é específica para o formato complexo do relatório de entrada.
+ */
+async function parseXLSXEntrada(filePath) {
+    console.log(`Lendo arquivo XLSX de Entrada: ${filePath}`);
+    try {
+        const fileBuffer = await fs.readFile(filePath);
+        const workbook = xlsx.read(fileBuffer);
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        // Converte para array de arrays (header: 1), 
+        // preservando linhas e tratando células vazias como nulas
+        const jsonData = xlsx.utils.sheet_to_json(worksheet, { 
+            header: 1,
+            defval: null 
+        }); 
+        return jsonData;
+    } catch (error) {
+        console.error(`Erro ao ler o arquivo Excel de Entrada ${filePath}:`, error);
+        return [];
+    }
+}
+
 
 /**
  * Limpa a pasta de downloads.
@@ -232,60 +257,146 @@ async function limparDownloads() {
 }
 
 /**
- * Processa os dados, cruza as informações e formata para a planilha.
+ * Processa os dados dos arquivos de entrada e de produtos.
+ * ESTA FUNÇÃO FOI COMPLETAMENTE REESCRITA PARA SE ADAPTAR AOS SEUS RELATÓRIOS.
  */
-async function processarDados(relatorioEntradaPath, relatorioProdutosPath) {
-    console.log('Iniciando processamento e cruzamento de dados...');
-    
-    // MODIFICADO: Chama a nova função parseXLSX
-    const produtosCSV = await parseXLSX(relatorioProdutosPath);
-    const mapaProdutos = new Map();
-    const mapProd = MAPEAMENTO_COLUNAS_CSV.PRODUTOS;
+async function processarDados(pathEntrada, pathProduto) {
+    console.log('Processando dados...');
 
-    for (const produto of produtosCSV) {
-        const codigo = produto[mapProd.CODIGO];
+    // --- 1. Criar Mapa de "Tradução" de Produtos ---
+    // (Usando a aba 'Produtos', que é uma tabela simples)
+    const colProdutos = MAPEAMENTO_COLUNAS_CSV.PRODUTOS;
+    const dadosProdutos = await parseXLSX(pathProduto); // Usa o parseXLSX original
+    const mapaProdutos = new Map();
+    
+    for (const produto of dadosProdutos) {
+        // 
+        const codigo = produto[colProdutos.CODIGO]; 
         if (codigo) {
-            mapaProdutos.set(codigo, {
-                familia: produto[mapProd.FAMILIA] || 'N/A',
-                depto: produto[mapProd.DEPARTAMENTO] || 'N/A'
+            mapaProdutos.set(codigo.toString().trim(), {
+                // 
+                familia: produto[colProdutos.FAMILIA],
+                // 
+                departamento: produto[colProdutos.DEPARTAMENTO]
             });
         }
     }
-    console.log(`${mapaProdutos.size} produtos carregados no mapa.`);
+    console.log(`Mapa de ${mapaProdutos.size} produtos criado.`);
 
-    // MODIFICADO: Chama a nova função parseXLSX
-    const entradasCSV = await parseXLSX(relatorioEntradaPath);
-    const dadosParaPlanilha = [];
-    const mapEntrada = MAPEAMENTO_COLUNAS_CSV.ENTRADA;
+    // --- 2. Processar Relatório de Entrada (Formato Complexo) ---
+    const colEntrada = MAPEAMENTO_COLUNAS_CSV.ENTRADA;
+    // Usa a nova função para ler o relatório como linhas/colunas
+    const linhasEntrada = await parseXLSXEntrada(pathEntrada); 
+    
+    const dadosFinais = [];
+    let dataEntradaAtual = null;
+    let indicesCabecalho = null;
 
-    for (const entrada of entradasCSV) {
-        const codigo = entrada[mapEntrada.CODIGO];
-        const infoProduto = mapaProdutos.get(codigo) || { familia: 'N/A', depto: 'N/A' };
+    // Cabeçalhos-alvo da planilha Google (conforme sua descrição)
+    const TARGET_HEADERS = {
+        DATA_ENTRADA: 'Data Entrada',
+        CODIGO: 'Código',
+        DESCRICAO: 'Descrição',
+        FAMILIA: 'Família',
+        DEPARTAMENTO: 'Departamento',
+        QNTD: 'Qntd.',
+        PRECO_UN: 'Preço Unít.',
+        DESC: 'Desc.',
+        TOTAL: 'Total'
+    };
 
-        // A biblioteca xlsx pode retornar números (ex: 123) 
-        // onde o csv-parse retornava strings (ex: "123").
-        // O código de mapeamento continua funcionando da mesma forma.
-        const linha = [
-            entrada[mapEntrada.DATA],
-            codigo,
-            entrada[mapEntrada.DESCRICAO],
-            infoProduto.familia,
-            infoProduto.depto,
-            entrada[mapEntrada.QNTD],
-            entrada[mapEntrada.PRECO_UN],
-            entrada[mapEntrada.DESC],
-            entrada[mapEntrada.TOTAL]
-        ];
-        
-        dadosParaPlanilha.push(linha);
+    // Expressão regular para encontrar a data de entrada no cabeçalho da nota
+    // Ex: "Entrada: 01/10/2025" [cite: 7596, 7611]
+    const regexDataEntrada = /Entrada:\s*(\d{2}\/\d{2}\/\d{4})/;
+
+    for (const linha of linhasEntrada) {
+        // Ignora linhas vazias ou sem dados
+        if (!linha || linha.length === 0 || linha.every(cell => cell === null)) {
+            continue;
+        }
+
+        // Converte a linha inteira para string para facilitar a busca de padrões
+        const linhaString = linha.join(',');
+
+        // --- A. Procurar Cabeçalho da Nota (para achar a Data) ---
+        const matchData = linhaString.match(regexDataEntrada);
+        if (matchData && matchData[1]) {
+            dataEntradaAtual = matchData[1]; // Ex: "01/10/2025" [cite: 7596, 7611]
+            
+            // Reseta o cabeçalho do produto, pois estamos em uma nova nota
+            indicesCabecalho = null; 
+            console.log(`Nota encontrada. Data de Entrada: ${dataEntradaAtual}`);
+            continue;
+        }
+
+        // --- B. Procurar Cabeçalho dos Produtos ---
+        // (Procura pela linha que define as colunas dos produtos)
+        // [cite: 7598, 7614]
+        if (linha[0] === colEntrada.CODIGO && linha[1] === colEntrada.DESCRICAO) {
+            // Encontramos o cabeçalho. Mapeia os índices (posição) das colunas.
+            indicesCabecalho = {
+                codigo: linha.indexOf(colEntrada.CODIGO),
+                descricao: linha.indexOf(colEntrada.DESCRICAO),
+                qntd: linha.indexOf(colEntrada.QNTD),
+                precoUn: linha.indexOf(colEntrada.PRECO_UN),
+                desc: linha.indexOf(colEntrada.DESC),
+                total: linha.indexOf(colEntrada.TOTAL)
+            };
+            
+            // Verifica se todas as colunas necessárias foram encontradas
+            if (Object.values(indicesCabecalho).some(v => v === -1)) {
+                console.warn('Alerta: O cabeçalho de produtos foi encontrado, mas algumas colunas do MAPEAMENTO_COLUNAS_CSV não correspondem.');
+                console.warn('Cabeçalho no arquivo:', linha);
+                console.warn('Índices encontrados:', indicesCabecalho);
+                indicesCabecalho = null; // Invalida para não processar errado
+            } else {
+                console.log('Cabeçalho de produtos encontrado. Iniciando leitura dos itens...');
+            }
+            continue;
+        }
+
+        // --- C. Processar Linhas de Produto ---
+        // Só processa se já tivermos uma data e um cabeçalho de produtos válido
+        if (dataEntradaAtual && indicesCabecalho) {
+            
+            const codigoProduto = linha[indicesCabecalho.codigo];
+            
+            // Se a primeira coluna não for um código válido (ex: linha vazia, "Total:", etc.),
+            // assume que os produtos desta nota acabaram.
+            if (!codigoProduto || (typeof codigoProduto !== 'number' && !/^\d+$/.test(codigoProduto.toString()))) {
+                // Reseta o cabeçalho para parar de ler produtos até a próxima nota
+                indicesCabecalho = null;
+                continue;
+            }
+
+            const codigoStr = codigoProduto.toString().trim();
+            // Busca no mapa de produtos; se não achar, usa 'N/A'
+            const produtoInfo = mapaProdutos.get(codigoStr) || { familia: 'N/A', departamento: 'N/A' };
+            
+            // Monta o objeto final com os nomes exatos das colunas da planilha Google
+            const novaLinha = {
+                [TARGET_HEADERS.DATA_ENTRADA]: dataEntradaAtual,
+                [TARGET_HEADERS.CODIGO]: codigoStr,
+                [TARGET_HEADERS.DESCRICAO]: linha[indicesCabecalho.descricao],
+                [TARGET_HEADERS.FAMILIA]: produtoInfo.familia,
+                [TARGET_HEADERS.DEPARTAMENTO]: produtoInfo.departamento,
+                [TARGET_HEADERS.QNTD]: linha[indicesCabecalho.qntd],
+                [TARGET_HEADERS.PRECO_UN]: linha[indicesCabecalho.precoUn],
+                [TARGET_HEADERS.DESC]: linha[indicesCabecalho.desc],
+                [TARGET_HEADERS.TOTAL]: linha[indicesCabecalho.total]
+            };
+
+            dadosFinais.push(novaLinha);
+        }
     }
 
-    console.log(`${dadosParaPlanilha.length} linhas de entrada processadas.`);
-    return dadosParaPlanilha;
+    console.log(`Processamento concluído. ${dadosFinais.length} linhas de produtos extraídas.`);
+    return dadosFinais;
 }
 
 /**
  * Adiciona os dados processados na planilha Google Sheets.
+ * ESTA FUNÇÃO FOI CORRIGIDA.
  */
 async function atualizarPlanilha(sheet, dados) {
     if (dados.length === 0) {
@@ -294,16 +405,14 @@ async function atualizarPlanilha(sheet, dados) {
     }
     
     console.log(`Adicionando ${dados.length} linhas à planilha...`);
-    const headerValues = sheet.headerValues;
-    const dadosComoObjetos = dados.map(linhaArray => {
-        const objLinha = {};
-        headerValues.forEach((header, index) => {
-            objLinha[header] = linhaArray[index];
-        });
-        return objLinha;
-    });
-
-    await sheet.addRows(dadosComoObjetos);
+    
+    // CORREÇÃO:
+    // A função 'processarDados' já retorna um array de objetos 
+    // com os cabeçalhos corretos (ex: { 'Data Entrada': '...', 'Código': '...' }).
+    // A biblioteca 'google-spreadsheet' aceita esse formato diretamente.
+    // A conversão anterior (map) estava quebrando os dados.
+    await sheet.addRows(dados);
+    
     console.log('Planilha atualizada com sucesso.');
 }
 
