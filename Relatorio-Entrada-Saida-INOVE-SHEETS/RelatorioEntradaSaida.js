@@ -257,42 +257,115 @@ async function limparDownloads() {
 }
 
 /**
+ * [FUNÇÃO AUXILIAR - ADICIONADA FORA DE PROCESSAR DADOS, NO BLOCO 4]
+ * Normaliza o código do produto.
+ * Garante que "1234", 1234, "1234.0", 1234.0, " 1234 " virem "1234".
+ */
+function normalizarCodigo(codigo) {
+    if (codigo === null || typeof codigo === 'undefined') {
+        return null;
+    }
+    // Converte para string, remove espaços, e pega a parte antes de um ponto ou vírgula.
+    // Isso trata tanto 1234.0 quanto 1234,0
+    const codigoStr = codigo.toString().trim();
+    const parteInteira = codigoStr.split('.')[0].split(',')[0];
+    
+    // Se a string original for vazia ou se tornar vazia, retorna nulo
+    if (parteInteira.length === 0) {
+        return null;
+    }
+    return parteInteira;
+}
+
+
+/**
  * Processa os dados dos arquivos de entrada e de produtos.
- * ESTA FUNÇÃO FOI COMPLETAMENTE REESCRITA PARA SE ADAPTAR AOS SEUS RELATÓRIOS.
+ * * [VERSÃO 3 - CORREÇÃO DE ZEROS À ESQUERDA]
+ * * Esta versão corrige o problema de "00002" (Entrada) vs "2" (Produtos).
+ * * Ela faz isso convertendo AMBOS os códigos para número e depois para string,
+ * * garantindo que a chave de busca seja idêntica.
  */
 async function processarDados(pathEntrada, pathProduto) {
     console.log('Processando dados...');
 
-    // --- 1. Criar Mapa de "Tradução" de Produtos ---
-    // (Usando a aba 'Produtos', que é uma tabela simples)
+    // --- Lógica de Normalização (para garantir que "00002" e "2" sejam iguais) ---
+    // Esta função "limpa" os códigos antes de compará-los
+    const normalizarCodigo = (codigo) => {
+        if (codigo === null || typeof codigo === 'undefined') {
+            return null; // Ignora valores nulos/undefined
+        }
+        
+        // Converte para string, remove espaços
+        let codigoStr = codigo.toString().trim();
+        
+        // Remove a parte decimal (ex: "1234.0" -> "1234")
+        // Isso também trata "1234,0"
+        codigoStr = codigoStr.split('.')[0].split(',')[0];
+
+        // Se ficou vazio (ex: era ".0"), retorna nulo
+        if (codigoStr.length === 0) {
+            return null;
+        }
+
+        // *** A CORREÇÃO PRINCIPAL ESTÁ AQUI ***
+        // 1. Tenta converter para número.
+        //    Isso transforma "00002" em 2 (número).
+        //    Isso transforma "2" em 2 (número).
+        const codigoNum = Number(codigoStr);
+
+        // 2. Verifica se a conversão falhou (ex: o código era "ABC")
+        if (isNaN(codigoNum)) {
+            // Se não for um número (ex: código de barras com letras),
+            // apenas retorna a string original limpa.
+            // NOTA: Se seus códigos NUNCA tiverem letras, você pode 
+            // até remover este 'if' e o 'console.warn'.
+            console.warn(`Código não-numérico encontrado: "${codigoStr}". Usando como está.`);
+            return codigoStr; // Retorna o código "ABC" como ele é
+        }
+
+        // 3. Converte de volta para string.
+        //    Isso transforma 2 (número) em "2" (texto).
+        // Agora, "00002" e "2" SÃO IGUAIS (ambos viram "2").
+        return codigoNum.toString();
+    };
+    // --- Fim da Lógica de Normalização ---
+
+
+    // --- 1. Criar o Dicionário (Mapa) com a Planilha Produto ---
+    // (O "banco de dados" do PROCV)
+    console.log('Criando dicionário de produtos (PROCV)...');
     const colProdutos = MAPEAMENTO_COLUNAS_CSV.PRODUTOS;
-    const dadosProdutos = await parseXLSX(pathProduto); // Usa o parseXLSX original
+    const dadosProdutos = await parseXLSX(pathProduto);
     const mapaProdutos = new Map();
     
     for (const produto of dadosProdutos) {
-        // 
-        const codigo = produto[colProdutos.CODIGO]; 
-        if (codigo) {
-            mapaProdutos.set(codigo.toString().trim(), {
-                // 
+        // [APLICA A CORREÇÃO]
+        const codigoOriginal = produto[colProdutos.CODIGO]; 
+        const codigoNorm = normalizarCodigo(codigoOriginal); // Normaliza (ex: "2" -> "2")
+
+        if (codigoNorm) { 
+            // Armazena no mapa. Chave: "2", Valor: { familia: "...", depto: "..." }
+            mapaProdutos.set(codigoNorm, {
                 familia: produto[colProdutos.FAMILIA],
-                // 
                 departamento: produto[colProdutos.DEPARTAMENTO]
             });
         }
     }
-    console.log(`Mapa de ${mapaProdutos.size} produtos criado.`);
+    console.log(`Dicionário criado com ${mapaProdutos.size} produtos.`);
+    if (mapaProdutos.size === 0) {
+        console.warn('ALERTA: O dicionário de produtos está vazio. Verifique o nome da coluna "Código" no seu MAPEAMENTO_COLUNAS_CSV.PRODUTOS e no arquivo Excel.');
+    }
 
-    // --- 2. Processar Relatório de Entrada (Formato Complexo) ---
+
+    // --- 2. Processar Relatório de Entrada (onde o PROCV será aplicado) ---
     const colEntrada = MAPEAMENTO_COLUNAS_CSV.ENTRADA;
-    // Usa a nova função para ler o relatório como linhas/colunas
     const linhasEntrada = await parseXLSXEntrada(pathEntrada); 
     
     const dadosFinais = [];
     let dataEntradaAtual = null;
-    let indicesCabecalho = null;
+    let indicesCabecalho = null; // Armazena a posição das colunas
 
-    // Cabeçalhos-alvo da planilha Google (conforme sua descrição)
+    // Cabeçalhos-alvo da planilha Google
     const TARGET_HEADERS = {
         DATA_ENTRADA: 'Data Entrada',
         CODIGO: 'Código',
@@ -305,35 +378,30 @@ async function processarDados(pathEntrada, pathProduto) {
         TOTAL: 'Total'
     };
 
-    // Expressão regular para encontrar a data de entrada no cabeçalho da nota
-    // Ex: "Entrada: 01/10/2025" [cite: 7596, 7611]
     const regexDataEntrada = /Entrada:\s*(\d{2}\/\d{2}\/\d{4})/;
 
     for (const linha of linhasEntrada) {
-        // Ignora linhas vazias ou sem dados
         if (!linha || linha.length === 0 || linha.every(cell => cell === null)) {
-            continue;
+            continue; // Ignora linha vazia
         }
 
-        // Converte a linha inteira para string para facilitar a busca de padrões
         const linhaString = linha.join(',');
 
-        // --- A. Procurar Cabeçalho da Nota (para achar a Data) ---
+        // --- A. Achar a Data da Nota ---
         const matchData = linhaString.match(regexDataEntrada);
         if (matchData && matchData[1]) {
-            dataEntradaAtual = matchData[1]; // Ex: "01/10/2025" [cite: 7596, 7611]
-            
-            // Reseta o cabeçalho do produto, pois estamos em uma nova nota
-            indicesCabecalho = null; 
-            console.log(`Nota encontrada. Data de Entrada: ${dataEntradaAtual}`);
+            dataEntradaAtual = matchData[1];
+            indicesCabecalho = null; // Reseta o cabeçalho, pois é uma nova nota
             continue;
         }
 
-        // --- B. Procurar Cabeçalho dos Produtos ---
-        // (Procura pela linha que define as colunas dos produtos)
-        // [cite: 7598, 7614]
-        if (linha[0] === colEntrada.CODIGO && linha[1] === colEntrada.DESCRICAO) {
-            // Encontramos o cabeçalho. Mapeia os índices (posição) das colunas.
+        // --- B. Achar o Cabeçalho dos Produtos na Nota ---
+        // (Verifica se a linha é a de cabeçalho, ex: "Código", "Descrição", ...)
+        const primeiraCelula = linha[0] ? String(linha[0]).trim() : "";
+        const segundaCelula = linha[1] ? String(linha[1]).trim() : "";
+
+        if (primeiraCelula === colEntrada.CODIGO && segundaCelula === colEntrada.DESCRICAO) {
+            // Encontramos o cabeçalho! Mapear os índices.
             indicesCabecalho = {
                 codigo: linha.indexOf(colEntrada.CODIGO),
                 descricao: linha.indexOf(colEntrada.DESCRICAO),
@@ -343,43 +411,50 @@ async function processarDados(pathEntrada, pathProduto) {
                 total: linha.indexOf(colEntrada.TOTAL)
             };
             
-            // Verifica se todas as colunas necessárias foram encontradas
             if (Object.values(indicesCabecalho).some(v => v === -1)) {
-                console.warn('Alerta: O cabeçalho de produtos foi encontrado, mas algumas colunas do MAPEAMENTO_COLUNAS_CSV não correspondem.');
+                console.warn('Alerta: O cabeçalho de produtos foi encontrado, mas algumas colunas do MAPEAMENTO_COLUNAS_CSV.ENTRADA não correspondem.');
                 console.warn('Cabeçalho no arquivo:', linha);
-                console.warn('Índices encontrados:', indicesCabecalho);
+                console.warn('MAPEAMENTO:', colEntrada);
                 indicesCabecalho = null; // Invalida para não processar errado
             } else {
-                console.log('Cabeçalho de produtos encontrado. Iniciando leitura dos itens...');
+                console.log('Cabeçalho de produtos encontrado. Lendo itens...');
             }
             continue;
         }
 
-        // --- C. Processar Linhas de Produto ---
-        // Só processa se já tivermos uma data e um cabeçalho de produtos válido
+        // --- C. Processar Linhas de Produto (Aplicar o PROCV) ---
+        // Só executa se já tivermos encontrado uma Data (A) e um Cabeçalho (B)
         if (dataEntradaAtual && indicesCabecalho) {
             
-            const codigoProduto = linha[indicesCabecalho.codigo];
+            const codigoProdutoOriginal = linha[indicesCabecalho.codigo];
             
-            // Se a primeira coluna não for um código válido (ex: linha vazia, "Total:", etc.),
-            // assume que os produtos desta nota acabaram.
-            if (!codigoProduto || (typeof codigoProduto !== 'number' && !/^\d+$/.test(codigoProduto.toString()))) {
-                // Reseta o cabeçalho para parar de ler produtos até a próxima nota
-                indicesCabecalho = null;
+            // [APLICA A CORREÇÃO]
+            const codigoNorm = normalizarCodigo(codigoProdutoOriginal); // Normaliza (ex: "00002" -> "2")
+
+            // Se o código não for válido (linha em branco, linha de "Total:", etc.),
+            // significa que os produtos desta nota acabaram.
+            if (!codigoNorm) { 
+                indicesCabecalho = null; // Para de ler produtos até a próxima nota
                 continue;
             }
 
-            const codigoStr = codigoProduto.toString().trim();
-            // Busca no mapa de produtos; se não achar, usa 'N/A'
-            const produtoInfo = mapaProdutos.get(codigoStr) || { familia: 'N/A', departamento: 'N/A' };
+            // --- O PROCV (VLOOKUP) ACONTECE AQUI ---
+            // Procura o 'codigoNorm' (ex: "2") no 'mapaProdutos'.
+            // Se não achar, usa o valor padrão (N/A).
+            const produtoInfo = mapaProdutos.get(codigoNorm) || { familia: 'N/A', departamento: 'N/A' };
             
-            // Monta o objeto final com os nomes exatos das colunas da planilha Google
+            // [LOG DE AJUDA] Se ainda falhar, isso vai te dizer o porquê
+            if (produtoInfo.familia === 'N/A') { 
+                console.log(`PROCV FALHOU: Código Original: "${codigoProdutoOriginal}", Normalizado: "${codigoNorm}". Não encontrado no mapa.`); 
+            }
+
+            // --- Monta a linha final ---
             const novaLinha = {
                 [TARGET_HEADERS.DATA_ENTRADA]: dataEntradaAtual,
-                [TARGET_HEADERS.CODIGO]: codigoStr,
+                [TARGET_HEADERS.CODIGO]: codigoNorm, // Salva o código normalizado
                 [TARGET_HEADERS.DESCRICAO]: linha[indicesCabecalho.descricao],
-                [TARGET_HEADERS.FAMILIA]: produtoInfo.familia,
-                [TARGET_HEADERS.DEPARTAMENTO]: produtoInfo.departamento,
+                [TARGET_HEADERS.FAMILIA]: produtoInfo.familia, // Resultado do PROCV
+                [TARGET_HEADERS.DEPARTAMENTO]: produtoInfo.departamento, // Resultado do PROCV
                 [TARGET_HEADERS.QNTD]: linha[indicesCabecalho.qntd],
                 [TARGET_HEADERS.PRECO_UN]: linha[indicesCabecalho.precoUn],
                 [TARGET_HEADERS.DESC]: linha[indicesCabecalho.desc],
