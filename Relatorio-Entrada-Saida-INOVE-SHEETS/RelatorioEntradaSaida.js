@@ -37,7 +37,7 @@ const SERVICE_ACCOUNT_FILE = path.join(__dirname, 'service-account.json');
 const GOOGLE_SHEET_ID = process.env.SHEET_ID_ENTRADA_SAIDA;
 const SHEET_NAME_ENTRADA = 'Entrada';
 const DATE_COLUMN_HEADER = 'Data Entrada'; // Nome exato da coluna na Planilha
-const DEFAULT_START_DATE = '2022-02-01'; // Data (yyyy-MM-dd) para usar se a planilha estiver vazia
+const DEFAULT_START_DATE = '2022-03-01'; // Data (yyyy-MM-dd) para usar se a planilha estiver vazia
 
 // --- Configurações de Download ---
 const DOWNLOAD_PATH = path.join(__dirname, 'downloads');

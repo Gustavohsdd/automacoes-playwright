@@ -35,6 +35,7 @@ dayjs.extend(isSameOrBefore);
 const PRODUTOS_PARA_PROCESSAR = [
   '2', // Pão Francês
   '274', // Pão de Queijo
+  '114', // Fatia de Pizza
   // '15', // Ex: Próximo produto
 ];
 
