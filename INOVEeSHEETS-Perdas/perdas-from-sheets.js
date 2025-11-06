@@ -15,6 +15,7 @@
 //
 // Novidade: Pré-validação de GTIN (padrão: inicia com "2" e tem 13 dígitos). Itens inválidos não são lançados e são listados no relatório final.
 // Novidade 2: Geração de Relatório PDF (Relatorio_Perdas.pdf) e Resumo no console ao final. (v5: Corrige erro ENOENT salvando na pasta do script)
+// Novidade 3 (Atual): Relatório PDF e Resumo do Console agora AGRUPAM itens idênticos e SOMAM seus valores.
 
 require('dotenv').config();
 const { chromium } = require('playwright');
@@ -456,13 +457,25 @@ async function gerarRelatorioPDF(itensLancados) {
   await new Promise((resolve, reject) => {
     const { minDate, maxDate } = getMinMaxDatas(itensLancados);
 
-    const itensConfeitaria = itensLancados
+    // ================================================================
+    // MODIFICAÇÃO: AGRUPAR ITENS
+    // ================================================================
+    
+    // 1. Crie a lista agrupada
+    const itensAgrupados = agruparItens(itensLancados);
+    
+    // 2. Baseie os relatórios de departamento na lista JÁ AGRUPADA
+    const itensConfeitaria = itensAgrupados
       .filter(it => normHeader(it.dpto).toUpperCase() === 'CONFEITARIA')
       .sort((a, b) => b.valor - a.valor);
 
-    const itensPadaria = itensLancados
+    const itensPadaria = itensAgrupados
       .filter(it => normHeader(it.dpto).toUpperCase() === 'PADARIA')
       .sort((a, b) => b.valor - a.valor);
+      
+    // ================================================================
+    // FIM DA MODIFICAÇÃO
+    // ================================================================
 
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     const stream = fs.createWriteStream(pdfPath); // Criamos a stream
@@ -479,7 +492,7 @@ async function gerarRelatorioPDF(itensLancados) {
     });
 
     // --- Página 1: Geral ---
-    doc.fontSize(16).text('Relatório de Perdas Geral', { align: 'center' });
+    doc.fontSize(16).text('Relatório de Perdas Geral (Agrupado)', { align: 'center' }); // Título modificado
     doc.moveDown(0.5);
     doc.fontSize(10).text(`Período: ${formatDate(minDate)} até ${formatDate(maxDate)}`, { align: 'center' });
     doc.moveDown(1.5);
@@ -500,8 +513,11 @@ async function gerarRelatorioPDF(itensLancados) {
     let currentY = doc.y;
     doc.font('Helvetica');
 
-    for (let i = 0; i < itensLancados.length; i++) {
-      const item = itensLancados[i];
+    // ================================================================
+    // MODIFICAÇÃO: Usar a lista agrupada para a PÁGINA 1
+    // ================================================================
+    for (let i = 0; i < itensAgrupados.length; i++) { // <-- MODIFICADO
+      const item = itensAgrupados[i]; // <-- MODIFICADO
       totalGeral += item.valor;
       
       // Checa se cabe na página, se não, pula
@@ -540,16 +556,21 @@ async function gerarRelatorioPDF(itensLancados) {
 function imprimirResumoConsole(itensLancados) {
   if (!itensLancados.length) return;
 
-  const { minDate, maxDate } = getMinMaxDatas(itensLancados);
-  const totalValor = itensLancados.reduce((acc, it) => acc + it.valor, 0);
-  const topItens = [...itensLancados].sort((a, b) => b.valor - a.valor).slice(0, 3); // Pega os 3 maiores
+  // ================================================================
+  // MODIFICAÇÃO: Agrupar itens para o resumo do console
+  // ================================================================
+  const itensAgrupados = agruparItens(itensLancados);
 
-  console.log(c.cyan('\n*------ CONTROLE DE PERDAS ------*'));
+  const { minDate, maxDate } = getMinMaxDatas(itensAgrupados); // Usa itensAgrupados
+  const totalValor = itensAgrupados.reduce((acc, it) => acc + it.valor, 0); // Usa itensAgrupados
+  const topItens = [...itensAgrupados].sort((a, b) => b.valor - a.valor).slice(0, 3); // Usa itensAgrupados
+
+  console.log(c.cyan('\n*--- CONTROLE DE PERDAS (AGRUPADO) ---*')); // Título modificado
   console.log(c.white('--------------------------------------'));
   console.log(c.white(`${formatDate(minDate)} até ${formatDate(maxDate)}`));
   console.log(c.white(`Total: ${formatCurrency(totalValor)}`));
   console.log(c.white('--------------------------------------'));
-  console.log(c.white('Itens de maior valor:'));
+  console.log(c.white('Itens de maior valor (agrupados):'));
   
   // Formata para alinhar os R$
   const maxLen = Math.max(...topItens.map(it => it.prod.length));
@@ -557,6 +578,33 @@ function imprimirResumoConsole(itensLancados) {
     const prodNome = item.prod.padEnd(maxLen, ' ');
     console.log(c.white(`${prodNome} ${formatCurrency(item.valor)}`));
   }
+}
+
+// ==========================
+// HELPER — Agregação (NOVO)
+// ==========================
+function agruparItens(itens) {
+  const mapa = new Map();
+
+  for (const item of itens) {
+    const chave = item.prod; // Agrupando pelo nome do produto
+    
+    if (!mapa.has(chave)) {
+      // Se é a primeira vez, cria a entrada
+      mapa.set(chave, {
+        prod: item.prod,
+        dpto: item.dpto, // Pega o DPTO do primeiro item
+        valor: 0,
+        isoDate: item.isoDate // Pega a data do primeiro (para getMinMaxDatas)
+      });
+    }
+    
+    // Soma o valor
+    mapa.get(chave).valor += item.valor;
+  }
+  
+  // Converte o Mapa de volta para um array
+  return Array.from(mapa.values());
 }
 
 
