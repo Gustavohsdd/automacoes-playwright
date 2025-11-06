@@ -1,6 +1,6 @@
 // INOVEeSHEETS-Perdas — perdas-from-sheets.js
 // Pasta sugerida: C:\Users\gusta\Documents\AutomacoesPro\INOVEeSHEETS-Perdas
-// Dependências: npm i playwright googleapis dotenv
+// Dependências: npm i playwright googleapis dotenv pdfkit
 // .env (exemplo):
 // SHEET_ID=1IYKAp2XXTN4ktE4288kGMnzj41xO8TgeTpgobb71hGA
 // SHEET_TAB=Produtos
@@ -14,10 +14,15 @@
 // LOTE_GRAVAR=50
 //
 // Novidade: Pré-validação de GTIN (padrão: inicia com "2" e tem 13 dígitos). Itens inválidos não são lançados e são listados no relatório final.
+// Novidade 2: Geração de Relatório PDF (Relatorio_Perdas.pdf) e Resumo no console ao final. (v5: Corrige erro ENOENT salvando na pasta do script)
 
 require('dotenv').config();
 const { chromium } = require('playwright');
 const { google } = require('googleapis');
+const PDFDocument = require('pdfkit'); // Para gerar PDF
+const fs = require('fs'); // Para salvar o PDF
+// const os = require('os'); // Removido - não vamos mais tentar achar o Desktop
+const path = require('path'); // Para construir o caminho do arquivo
 
 // ===== Cores ANSI (sem dependências externas) =====
 const c = {
@@ -88,13 +93,19 @@ function a1Col(n) { // 1->A
 function toISODate(cell) {
   if (cell === undefined || cell === null || cell === '') return '';
   if (typeof cell === 'number') {
-    // Serial date do Sheets
+    // Serial date do Sheets (Data do Excel/Sheets)
     const base = new Date(1899, 11, 30);
-    const ms = Math.round(cell * 24 * 60 * 60 * 1000);
-    const d = new Date(base.getTime() + ms);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    const dd = String(d.getDate()).padStart(2,'0');
+    // Ajuste fino para garantir arredondamento correto de ms
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const dateMilliseconds = Math.round((cell - (cell > 60 ? 1 : 0)) * msPerDay);
+    
+    // Cria a data base (30/12/1899)
+    const epoch = Date.parse('1899-12-30T00:00:00.000Z');
+    const d = new Date(epoch + dateMilliseconds);
+
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth()+1).padStart(2,'0');
+    const dd = String(d.getUTCDate()).padStart(2,'0');
     return `${yyyy}-${mm}-${dd}`;
   }
   const s = String(cell).trim();
@@ -109,12 +120,35 @@ function toISODate(cell) {
   return s; // fallback
 }
 
+// Helper para formatar R$ 1.234,56 para 1234.56
+function parseCurrency(val) {
+  if (typeof val === 'number') return val;
+  const s = String(val || '0')
+    .replace('R$', '')
+    .replace(/\./g, '') // remove separador de milhar
+    .replace(',', '.') // troca vírgula por ponto
+    .trim();
+  return parseFloat(s) || 0;
+}
+
+// Helper para formatar 1234.56 para R$1.234,56
+function formatCurrency(num) {
+  return (num || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+// Helper para formatar 'yyyy-mm-dd' para 'dd/mm/yyyy'
+function formatDate(isoDate) {
+  if (!isoDate || isoDate.length < 10) return '--/--/----';
+  const [y, m, d] = isoDate.substring(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
+
 async function lerPlanilhaCompleta(sheets) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
     range: `${SHEET_TAB}!A:Z`,
-    valueRenderOption: 'UNFORMATTED_VALUE',
-    dateTimeRenderOption: 'FORMATTED_STRING',
+    valueRenderOption: 'UNFORMATTED_VALUE', // Pega números como números
+    dateTimeRenderOption: 'FORMATTED_STRING', // Pega datas formatadas se UNFORMATTED falhar
   });
   const values = res.data.values || [];
   if (!values.length) return { headers: [], rows: [] };
@@ -139,6 +173,9 @@ function indices(headers) {
   return {
     gtin:   idx('Gtin'),
     data:   idx('DATA','Data'),
+    prod:   idx('PRODUTO', 'Produto', 'Descricao'), // Corrigido de 'PROD' para 'PRODUTO'
+    dpto:   idx('DPTO', 'Departamento'),
+    valor:  idx('VALOR', 'PRECO', 'PREÇO', 'Valor Total'),
     status: idx('Status','Status.'),
   };
 }
@@ -282,24 +319,284 @@ async function gravarLote(page) {
 }
 
 // ==========================
+// HELPERS — Relatórios (v5 - Salva na pasta do script)
+// ==========================
+
+// Encontra a data mais antiga e a mais nova
+function getMinMaxDatas(itens) {
+  if (!itens.length) return { minDate: null, maxDate: null };
+  const datas = itens.map(it => it.isoDate).sort();
+  return {
+    minDate: datas[0],
+    maxDate: datas[datas.length - 1],
+  };
+}
+
+// Helper para desenhar linhas da tabela
+function drawTableRow(doc, y, item, colWidths, isEven, drawDptoColumn = false) {
+  const rowHeight = 14; // Altura da linha
+  const startX = 50; // Margem esquerda
+  const tableWidth = 512; // 595 (A4) - 50 - 50 = 495. Usando 512 (margens 41.5)
+
+  // --- Desenha fundo alternado ---
+  if (isEven) {
+    doc.fillColor('#f0f0f0') // Cinza claro
+       .rect(startX, y - 3, tableWidth, rowHeight) // -3 para ajustar o padding vertical
+       .fill();
+    doc.fillColor('black'); // Restaura cor da fonte
+  }
+
+  // --- Desenha Células ---
+  doc.fontSize(8); // Fonte pequena
+  
+  // Coluna 1 (Produto)
+  // A largura da coluna produto muda se o DPTO está visível ou não
+  const prodWidth = drawDptoColumn ? colWidths[0] : (colWidths[0] + colWidths[1] + 5); // Usa o espaço extra
+  
+  doc.text(item.prod, startX + 5, y, { 
+    width: prodWidth, 
+    align: 'left',
+    lineBreak: false, // Evita quebra de linha
+    ellipsis: true    // Adiciona "..." se for muito longo
+  });
+  
+  // Coluna 2 (DPTO ou Valor)
+  if (drawDptoColumn) {
+    // Página 1 (com DPTO)
+    doc.text(item.dpto, startX + colWidths[0] + 5, y, { 
+      width: colWidths[1], 
+      align: 'center' 
+    });
+    doc.text(formatCurrency(item.valor), startX + colWidths[0] + colWidths[1] + 5, y, { 
+      width: colWidths[2], 
+      align: 'right' 
+    });
+  } else {
+    // Página 2 e 3 (sem DPTO)
+    // Posição X e Largura ajustadas para alinhar à direita corretamente
+    const valorX = startX + colWidths[0] + colWidths[1] + 5; // Posição X da col Valor (Pág 1)
+    const valorWidth = colWidths[2]; // Largura da col Valor (Pág 1)
+    
+    doc.text(formatCurrency(item.valor), valorX, y, { 
+      width: valorWidth, 
+      align: 'right' 
+    });
+  }
+  
+  return y + rowHeight;
+}
+
+// Função para listar itens em uma página do PDF (Pág 2 e 3)
+function listarItensPDF(doc, titulo, itens, dataMin, dataMax) {
+  doc.addPage();
+  doc.fontSize(16).text(titulo, { align: 'center' }); // Título
+  doc.moveDown(0.5);
+  doc.fontSize(10).text(`Período: ${formatDate(dataMin)} até ${formatDate(dataMax)}`, { align: 'center' }); // Subtítulo
+  doc.moveDown(1.5);
+
+  const tableTop = doc.y; // Posição inicial da tabela
+  const startX = 50;
+  // Larguras para Pág 1 (Geral) - vamos usar as mesmas e esconder o DPTO
+  const colWidths = [332, 100, 80]; // Larguras: Produto, (DPTO-escondido), Valor
+  const prodHeaderWidth = colWidths[0] + colWidths[1] + 5;
+  const valorHeaderX = startX + colWidths[0] + colWidths[1] + 5;
+  const valorHeaderWidth = colWidths[2];
+
+  // --- Cabeçalho ---
+  doc.font('Helvetica-Bold').fontSize(9);
+  doc.text('Produto', startX + 5, tableTop, { width: prodHeaderWidth }); // Produto (Produto + DPTO)
+  doc.text('Valor', valorHeaderX, tableTop, { width: valorHeaderWidth, align: 'right' }); // Valor
+  doc.moveDown(1.5);
+  
+  // --- Linhas ---
+  let totalDpto = 0;
+  let currentY = doc.y;
+  doc.font('Helvetica');
+
+  for (let i = 0; i < itens.length; i++) {
+    const item = itens[i];
+    totalDpto += item.valor;
+    
+    // Checa se cabe na página, se não, pula
+    if (currentY > 720) { // Limite inferior (A4 = 841.89)
+      doc.addPage();
+      currentY = 50; // Margem superior
+    }
+    
+    // Passa 'false' para drawDptoColumn
+    currentY = drawTableRow(doc, currentY, item, colWidths, i % 2 === 0, false);
+  }
+
+  // --- Total ---
+  currentY += 10; // Espaço antes do total
+  doc.font('Helvetica-Bold').fontSize(10);
+  doc.text('Total Departamento:', startX, currentY, {
+    width: colWidths[0] + colWidths[1] + 5, // Largura combinada
+    align: 'right'
+  });
+  doc.text(formatCurrency(totalDpto), valorHeaderX, currentY, {
+    width: valorHeaderWidth, // Largura do valor
+    align: 'right'
+  });
+  doc.font('Helvetica');
+}
+
+// Função principal de gerar PDF
+async function gerarRelatorioPDF(itensLancados) {
+  if (!itensLancados.length) return;
+  
+  // (CORREÇÃO v5) Salva o PDF na mesma pasta onde o script está rodando
+  // __dirname é uma variável global do Node.js que dá o diretório do arquivo atual
+  const pdfPath = path.join(__dirname, 'Relatorio_Perdas.pdf');
+
+  console.log(c.cyan(`\nGerando ${pdfPath}...`));
+
+  // (Mantido v4) Envolvemos a escrita do PDF em uma Promise
+  // para garantir que o script espere o arquivo ser salvo.
+  await new Promise((resolve, reject) => {
+    const { minDate, maxDate } = getMinMaxDatas(itensLancados);
+
+    const itensConfeitaria = itensLancados
+      .filter(it => normHeader(it.dpto).toUpperCase() === 'CONFEITARIA')
+      .sort((a, b) => b.valor - a.valor);
+
+    const itensPadaria = itensLancados
+      .filter(it => normHeader(it.dpto).toUpperCase() === 'PADARIA')
+      .sort((a, b) => b.valor - a.valor);
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    const stream = fs.createWriteStream(pdfPath); // Criamos a stream
+    doc.pipe(stream); // Pipe para a stream
+
+    // Listeners de evento para saber quando terminou
+    stream.on('finish', () => {
+      console.log(c.green(`✔ ${pdfPath} salvo.`)); // Log movido para cá
+      resolve(); // Sucesso!
+    });
+    stream.on('error', (err) => {
+      console.error(c.red(`Erro ao salvar PDF: ${err.message}`));
+      reject(err); // Falha!
+    });
+
+    // --- Página 1: Geral ---
+    doc.fontSize(16).text('Relatório de Perdas Geral', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(10).text(`Período: ${formatDate(minDate)} até ${formatDate(maxDate)}`, { align: 'center' });
+    doc.moveDown(1.5);
+    
+    const tableTop = doc.y;
+    const startX = 50;
+    const colWidths = [332, 100, 80]; // Larguras: Produto, DPTO, Valor
+    
+    // --- Cabeçalho Pág 1 ---
+    doc.font('Helvetica-Bold').fontSize(9);
+    doc.text('Produto', startX + 5, tableTop);
+    doc.text('DPTO', startX + colWidths[0] + 5, tableTop, { width: colWidths[1], align: 'center' });
+    doc.text('Valor', startX + colWidths[0] + colWidths[1] + 5, tableTop, { width: colWidths[2], align: 'right' });
+    doc.moveDown(1.5);
+
+    // --- Linhas Pág 1 ---
+    let totalGeral = 0;
+    let currentY = doc.y;
+    doc.font('Helvetica');
+
+    for (let i = 0; i < itensLancados.length; i++) {
+      const item = itensLancados[i];
+      totalGeral += item.valor;
+      
+      // Checa se cabe na página, se não, pula
+      if (currentY > 720) { // Limite inferior (A4 = 841.89)
+        doc.addPage();
+        currentY = 50; // Margem superior
+      }
+      
+      // Passa 'true' para drawDptoColumn
+      currentY = drawTableRow(doc, currentY, item, colWidths, i % 2 === 0, true);
+    }
+
+    // --- Total Pág 1 ---
+    currentY += 10;
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Total Geral:', startX, currentY, {
+      width: colWidths[0] + colWidths[1] + 5,
+      align: 'right'
+    });
+    doc.text(formatCurrency(totalGeral), startX + colWidths[0] + colWidths[1] + 5, currentY, {
+      width: colWidths[2],
+      align: 'right'
+    });
+    doc.font('Helvetica');
+
+    // --- Página 2: Confeitaria ---
+    listarItensPDF(doc, 'Relatório de Perdas - Confeitaria', itensConfeitaria, minDate, maxDate);
+
+    // --- Página 3: Padaria ---
+    listarItensPDF(doc, 'Relatório de Perdas - Padaria', itensPadaria, minDate, maxDate);
+
+    doc.end(); // Isso dispara o evento 'finish'
+  }); // Fim da Promise
+}
+
+function imprimirResumoConsole(itensLancados) {
+  if (!itensLancados.length) return;
+
+  const { minDate, maxDate } = getMinMaxDatas(itensLancados);
+  const totalValor = itensLancados.reduce((acc, it) => acc + it.valor, 0);
+  const topItens = [...itensLancados].sort((a, b) => b.valor - a.valor).slice(0, 3); // Pega os 3 maiores
+
+  console.log(c.cyan('\n*------ CONTROLE DE PERDAS ------*'));
+  console.log(c.white('--------------------------------------'));
+  console.log(c.white(`${formatDate(minDate)} até ${formatDate(maxDate)}`));
+  console.log(c.white(`Total: ${formatCurrency(totalValor)}`));
+  console.log(c.white('--------------------------------------'));
+  console.log(c.white('Itens de maior valor:'));
+  
+  // Formata para alinhar os R$
+  const maxLen = Math.max(...topItens.map(it => it.prod.length));
+  for (const item of topItens) {
+    const prodNome = item.prod.padEnd(maxLen, ' ');
+    console.log(c.white(`${prodNome} ${formatCurrency(item.valor)}`));
+  }
+}
+
+
+// ==========================
 // PIPELINE
 // ==========================
 (async () => {
   const sheets = await getSheets();
   const { headers, rows } = await lerPlanilhaCompleta(sheets);
   if (!headers.length) { console.log(c.red('Planilha vazia ou sem cabeçalho.')); return; }
-  const { gtin: idxGtin, data: idxData, status: idxStatus } = indices(headers);
+
+  // Índices agora incluem colunas de relatório
+  const { 
+    gtin: idxGtin, 
+    data: idxData, 
+    status: idxStatus,
+    prod: idxProd,
+    dpto: idxDpto,
+    valor: idxValor
+  } = indices(headers);
+
   if (idxGtin < 0)   throw new Error('Coluna "Gtin" não encontrada.');
   if (idxData < 0)   throw new Error('Coluna "DATA" não encontrada.');
   if (idxStatus < 0) throw new Error('Coluna "Status" não encontrada.');
+  if (idxProd < 0)   throw new Error('Coluna "PRODUTO" (Produto) não encontrada.');
+  if (idxDpto < 0)   throw new Error('Coluna "DPTO" (Departamento) não encontrada.');
+  if (idxValor < 0)  throw new Error('Coluna "VALOR" (ou PRECO) não encontrada.');
 
   // Pega pendentes (Status em branco) com GTIN e DATA presentes
   const pendentes = rows
     .filter(r => !String(r._raw[idxStatus] ?? '').trim())
     .map(r => ({
+      // Dados para o Robô
       rowNumber: r._rowNumber,
       gtin: String(r._raw[idxGtin] ?? '').trim(),
       isoDate: toISODate(r._raw[idxData]),
+      // Dados para o Relatório
+      prod: String(r._raw[idxProd] ?? 'N/D'),
+      dpto: String(r._raw[idxDpto] ?? 'N/D'),
+      valor: parseCurrency(r._raw[idxValor]),
     }))
     .filter(x => x.gtin && x.isoDate);
 
@@ -312,7 +609,7 @@ async function gravarLote(page) {
 
   // ===== Pré-análise de GTIN =====
   const invalidGtins = [];
-  const itens = [];
+  const itens = []; // Itens válidos para lançar
   for (const it of pendentes) {
     const g = it.gtin;
     if (isValidGtinPattern(g)) {
@@ -359,7 +656,10 @@ async function gravarLote(page) {
   // 2) Produto → 3) Perdas
   await irParaPerdas(page);
 
-  let processadosNoLote = [];
+  // Array para guardar os itens que foram REALMENTE lançados
+  const itensLancadosHoje = [];
+
+  let processadosNoLote = []; // Guarda { rowNumber, itemCompleto }
   let primeiroIsoDaLote = null;
 
   const fecharLote = async () => {
@@ -379,9 +679,16 @@ async function gravarLote(page) {
       await esperarTelaListaPerdas(page);
     }
 
+    // Coleta dados para relatório e Sheets
+    const rowNumbersParaMarcar = [];
+    for (const proc of processadosNoLote) {
+      rowNumbersParaMarcar.push(proc.rowNumber);
+      itensLancadosHoje.push(proc.itemCompleto); // Adiciona ao relatório final
+    }
+
     // Marca no Sheets
-    await atualizarStatusEmLote(sheets, headers, processadosNoLote, 'Lançado');
-    console.log(c.green(`✔ Lote gravado e ${processadosNoLote.length} item(ns) marcados como Lançado no Sheets.`));
+    await atualizarStatusEmLote(sheets, headers, rowNumbersParaMarcar, 'Lançado');
+    console.log(c.green(`✔ Lote gravado e ${rowNumbersParaMarcar.length} item(ns) marcados como Lançado no Sheets.`));
 
     processadosNoLote = [];
     primeiroIsoDaLote = null;
@@ -409,7 +716,9 @@ async function gravarLote(page) {
     console.log(c.blue(`→ Lançando item ${i+1}/${itens.length} (linha ${item.rowNumber}) — DATA ${item.isoDate} — GTIN ${item.gtin}`));
 
     await lançarProduto(page, item.gtin);
-    processadosNoLote.push(item.rowNumber);
+    
+    // Adiciona ao lote (item completo, para o relatório)
+    processadosNoLote.push({ rowNumber: item.rowNumber, itemCompleto: item });
 
     if (processadosNoLote.length >= LOTE_GRAVAR) {
       await fecharLote();
@@ -432,10 +741,16 @@ async function gravarLote(page) {
     }
   }
 
+  // ===== NOVOS RELATÓRIOS (PDF e Console) =====
+  await gerarRelatorioPDF(itensLancadosHoje);
+  imprimirResumoConsole(itensLancadosHoje);
+  
+  // =============================================
+
   console.log(c.cyan('\nFinalizado.'));
 })().catch(err => {
   const rawMsg = (err && (err.message || err.status || err.code)) || '';
-  const causeMsg = (err && err.cause && (err.cause.message || err.cause.status || err.cause.code)) || '';
+  const causeMsg = (err && err.cause && (err.cause.message || err.cause.status || err.code)) || '';
   const full = `${rawMsg} ${causeMsg}`.toLowerCase();
 
   if (full.includes('sheets api has not been used') || full.includes('it is disabled') || full.includes('permission_denied')) {
