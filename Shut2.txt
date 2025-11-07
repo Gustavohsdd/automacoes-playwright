@@ -1,7 +1,7 @@
 ### SCRIPT DE CONTROLE PARA DVR INTELBRAS (MHDX 3132) - VERSÃO 3 (MODIFICADO) ###
 
 # --- Configure suas informações aqui ---
-$ipDVR = "10.0.0.91" 
+$ipDVR = "10.0.0.145" 
 $portaHTTP = "80" 
 $usuario = "admin2" 
 
