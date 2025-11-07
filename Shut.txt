@@ -1,0 +1,53 @@
+10.0.0.91
+10.0.0.145
+
+
+### SCRIPT DE CONTROLE PARA DVR INTELBRAS (MHDX 3132) - VERSÃO 2 ###
+
+# --- Configure suas informações aqui ---
+$ipDVR = "10.0.0.91" # Já atualizei com seu IP
+$portaHTTP = "80" 
+$usuario = "admin2" 
+# ----------------------------------------
+
+# 1. Pergunta sua senha de forma segura
+$cred = Get-Credential -UserName $usuario -Message "Digite a senha do DVR ($usuario)"
+
+# 2. Permite que você escolha a ação
+Write-Host "O que você quer fazer com o DVR ($ipDVR)?" -ForegroundColor Green
+Write-Host "1 - DESLIGAR (Shutdown) - (O DVR vai parar. Exige ligar fisicamente)"
+Write-Host "2 - REINICIAR (Reboot)   - (O DVR vai desligar e ligar sozinho)"
+Write-Host "Q - Sair"
+$escolha = Read-Host "Digite sua escolha (1, 2 ou Q)"
+
+# 3. Define qual comando (URL) usar
+switch ($escolha) {
+    "1" {
+        $acao = "shutdown"
+        Write-Host "Enviando comando para DESLIGAR..." -ForegroundColor Yellow
+    }
+    "2" {
+        $acao = "reboot"
+        Write-Host "Enviando comando para REINICIAR..." -ForegroundColor Yellow
+    }
+    default {
+        Write-Host "Ação cancelada."
+        return
+    }
+}
+
+# 4. Monta a URL da API da Intelbras/Dahua
+$url = "http://$ipDVR`:$portaHTTP/cgi-bin/magicBox.cgi?action=$acao"
+
+# 5. Envia o comando para o DVR
+try {
+    # Usamos Invoke-RestMethod que lida muito bem com autenticação
+    Invoke-RestMethod -Uri $url -Method Get -Credential $cred -AllowUnencryptedAuthentication # <--- ADIÇÃO CHAVE AQUI
+    
+    Write-Host "Comando '$acao' enviado com sucesso para $url" -ForegroundColor Green
+    Write-Host "Aguarde alguns instantes para o DVR processar."
+}
+catch {
+    Write-Error "FALHA AO ENVIAR O COMANDO: $_"
+    Write-Error "Verifique se o IP ($ipDVR) está correto e se a senha foi digitada corretamente."
+}
